@@ -78,9 +78,17 @@ PeerPouch.valid = function() {
 
 
 PeerPouch.Presence = function(hub, opts, callback) {
+  // TODO: provide default opts
+  
+  // opts includes: name string, identity string/TBD, profile object, share {name:db}, peerUpdate callback
+  // api allows: getPeers(), connectTo(), disconnect()
+  
+  var api = {};
+  
   // this object manages a pool of peer objects, which along with a database name can be used to create a PeerPouch instance
   // hub is *another* Pouch instance (typically http type) — we'll use that database for communicating presence/offers/answers!
-  // this manager should provide: basic peer identity, ability to control our presence, ability to monitor others' presence
+  
+  return api;
 };
 
 
