@@ -60,8 +60,10 @@ var PeerPouch = function(opts, callback) {
     return Math.random().toFixed(16).slice(2);
   };
   
+  // TODO: add appropriate support for plugins (query/spatial/etc.)
+  
   return api;
-}
+};
 
 // Don't bother letting peers nuke each others' databases
 PeerPouch.destroy = function(name, callback) {
