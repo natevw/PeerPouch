@@ -76,6 +76,14 @@ PeerPouch.valid = function() {
   return true;
 };
 
+
+PeerPouch.Presence = function(hub, opts, callback) {
+  // this object manages a pool of peer objects, which along with a database name can be used to create a PeerPouch instance
+  // hub is *another* Pouch instance (typically http type) — we'll use that database for communicating presence/offers/answers!
+  // this manager should provide: basic peer identity, ability to control our presence, ability to monitor others' presence
+};
+
+
 if (typeof module !== 'undefined' && module.exports) {
   // running in node
   var pouchdir = '../';
