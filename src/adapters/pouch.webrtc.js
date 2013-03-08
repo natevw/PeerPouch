@@ -3,7 +3,7 @@
 
 "use strict";
 
-// Implements the API for dealing with PouchDB peers over WebRTC
+// Implements the API for dealing with a PouchDB peer's database over WebRTC
 var PeerPouch = function(opts, callback) {
   function TODO(callback) {
     // TODO: callers of this function want implementations
@@ -77,16 +77,49 @@ PeerPouch.valid = function() {
 };
 
 
-PeerPouch.Presence = function(hub, opts, callback) {
-  // TODO: provide default opts
+PeerPouch._doctypes = {
+    offer: 'com.stemstorage.peerpouch.offer'
+}
+
+
+PeerPouch.Presence = function(hub, opts) {
+  opts || (opts == {});
   
+  // hub is *another* Pouch instance (typically http type) — we'll use that database for communicating presence/offers/answers!
   // opts includes: name string, identity string/TBD, profile object, share {name:db}, peerUpdate callback
   // api allows: getPeers(), connectTo(), disconnect()
   
+  var self = {
+    _id: 'offer-'+Math.random().toFixed(5).slice(2),
+    name: opts.name || "Friendly neighbor",
+    identity: opts.identity || Math.random().toFixed(20).slice(2),
+    profile: opts.profile || {},
+    shares: Object.keys(opts.shares || {}),
+    offer: null
+  };
+  self.profile.browser = opts.browser || navigator.userAgent.replace(/^.*(Firefox|Chrome|Mobile)\/([0-9.]+).*$/, "$1 $2").replace("Mobile", "Bowser");
+  self[PeerPouch._doctypes.offer] = true;
+  
   var api = {};
   
-  // this object manages a pool of peer objects, which along with a database name can be used to create a PeerPouch instance
-  // hub is *another* Pouch instance (typically http type) — we'll use that database for communicating presence/offers/answers!
+  api.joinHub = function (cb) {
+    // TODO: get a WebRTC offer and store to hub
+    
+  };
+  
+  api.leaveHub = function (cb) {
+    // TODO: remove offer document from hub
+  };
+  
+  api.getPeers = function (cb) {
+    function map(doc) {
+      if (doc[PeerPouch._doctypes.offer] && doc.identity !== self.identity) emit(doc.identity, doc.name)
+    }
+    hub.query({map:map}, {include_docs:true}, function (e, d) {
+      if (e) cb(e);
+      else cb(null, d.rows.map(function (d) { return d.doc; }));
+    });
+  };
   
   return api;
 };
@@ -101,3 +134,5 @@ if (typeof module !== 'undefined' && module.exports) {
 
 // Register for our scheme
 Pouch.adapter('webrtc', PeerPouch);
+
+Pouch.dbgPeerPouch = PeerPouch;
