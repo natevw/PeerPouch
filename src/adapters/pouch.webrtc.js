@@ -77,10 +77,32 @@ PeerPouch.valid = function() {
 };
 
 
-PeerPouch._doctypes = {
-    offer: 'com.stemstorage.peerpouch.offer'
+PeerPouch._types = {
+  presence: 'com.stemstorage.peerpouch.presence',
+  message: 'com.stemstorage.peerpouch.message',
+  ddoc_name: 'peerpouch-dev'
 }
 
+var _t = PeerPouch._types;     // local alias for brevitation…
+function _ddoc_replacer(k,v) {
+  return (typeof v === 'function') ? v.toString().replace(/_t.(\w+)/, function (m,t) {    // …and hacky unbrevitation
+    return JSON.stringify(_t[t]);
+  }) : v;
+}
+
+PeerPouch._ddoc = JSON.parse(JSON.stringify({
+  _id: '_design/' + _t.ddoc_name,
+  filters: {
+    signalling: function (doc, req) {
+      return (doc[_t.presence] || (doc[_t.message] && doc.recipient === req.query.identity));
+    }
+  },
+  views: {
+    peers_by_identity: {
+      map: function (doc) { if (doc[_t.offer]) emit(doc.identity, doc.name); }
+    }
+  }
+}, _ddoc_replacer));
 
 PeerPouch.Presence = function(hub, opts) {
   opts || (opts == {});
@@ -88,6 +110,8 @@ PeerPouch.Presence = function(hub, opts) {
   // hub is *another* Pouch instance (typically http type) — we'll use that database for communicating presence/offers/answers!
   // opts includes: name string, identity string/TBD, profile object, share {name:db}, peerUpdate callback
   // api allows: getPeers(), connectTo(), disconnect()
+  
+  // TODO: add concept of "separate" peer groups within a common hub?
   
   var RTCPeerConnection = window.RTCPeerConnection || webkitRTCPeerConnection || mozRTCPeerConnection;
   var RTCSessionDescription = window.RTCSessionDescription || webkitRTCSessionDescription || mozRTCSessionDescription;
@@ -107,7 +131,7 @@ PeerPouch.Presence = function(hub, opts) {
     offer: null
   };
   self.profile.browser = opts.browser || navigator.userAgent.replace(/^.*(Firefox|Chrome|Mobile)\/([0-9.]+).*$/, "$1 $2").replace("Mobile", "Bowser");
-  self[PeerPouch._doctypes.offer] = true;
+  self[_t.offer] = true;
   
   function updateSelf(cb) {
     hub.post(self, function (e,d) {
@@ -144,10 +168,7 @@ PeerPouch.Presence = function(hub, opts) {
   };
   
   api.getPeers = function (cb) {
-    function map(doc) {
-      if (doc[PeerPouch._doctypes.offer]) emit(doc.identity, doc.name)
-    }
-    hub.query({map:map}, {include_docs:true}, function (e, d) {
+    hub.query(_t.ddoc_name+'/peers_by_identity', {include_docs:true}, function (e, d) {
       if (e) cb(e);
       else cb(null, d.rows.filter(function (r) { return r.doc.identity !== self.identity; }).map(function (r) { return r.doc; }));
     });
@@ -157,6 +178,17 @@ PeerPouch.Presence = function(hub, opts) {
   
   return api;
 };
+
+PeerPouch.Presence.verifyHub = function (hub, opts, cb) {
+  if (typeof opts === 'function') {
+    cb = opts;
+    opts = {};
+  }
+  hub.put(PeerPouch._ddoc, function (e,d) {
+    // TODO: handle versioning (leave if higher minor, upgrade if lower minor, error if major difference)
+    call(cb, e, (e) ? null : {version:'dev'});
+  });
+}
 
 
 if (typeof module !== 'undefined' && module.exports) {
