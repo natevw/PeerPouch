@@ -89,6 +89,15 @@ PeerPouch.Presence = function(hub, opts) {
   // opts includes: name string, identity string/TBD, profile object, share {name:db}, peerUpdate callback
   // api allows: getPeers(), connectTo(), disconnect()
   
+  var RTCPeerConnection = window.RTCPeerConnection || webkitRTCPeerConnection || mozRTCPeerConnection;
+  var RTCSessionDescription = window.RTCSessionDescription || webkitRTCSessionDescription || mozRTCSessionDescription;
+  
+  // TODO: make ICE (and other channel setup params?) user-configurable
+  var cfg = {"iceServers":[{"url":"stun:23.21.150.121"}]},
+      con = { 'optional': [{'DtlsSrtpKeyAgreement': true}, {'RtpDataChannels': true }] },
+      rtc = new RTCPeerConnection(cfg, con);      // TODO: we'll actually need one of these for each connected peer
+  // NOTE: createDataChannel needs `open /Applications/Google\ Chrome\ Canary.app --args --enable-data-channels` :-(
+  
   var self = {
     _id: 'offer-'+Math.random().toFixed(5).slice(2),
     name: opts.name || "Friendly neighbor",
@@ -100,26 +109,51 @@ PeerPouch.Presence = function(hub, opts) {
   self.profile.browser = opts.browser || navigator.userAgent.replace(/^.*(Firefox|Chrome|Mobile)\/([0-9.]+).*$/, "$1 $2").replace("Mobile", "Bowser");
   self[PeerPouch._doctypes.offer] = true;
   
+  function updateSelf(cb) {
+    hub.post(self, function (e,d) {
+      if (!e) self._rev = d.rev;
+      else console.warn("Trouble sharing presence", e, d);
+      call(cb, e, d);
+    });
+  }
+  
   var api = {};
   
+  // gets a WebRTC offer and shares it via hub
   api.joinHub = function (cb) {
-    // TODO: get a WebRTC offer and store to hub
-    
+    // TODO: probably need to addStream
+    rtc.createOffer(function (offerDesc) {
+        rtc.setLocalDescription(offerDesc);
+        self.offer = offerDesc.sdp;
+        updateSelf(cb);
+    }, function (e) { call(cb,e); });
   };
   
   api.leaveHub = function (cb) {
-    // TODO: remove offer document from hub
+    hub.remove(self._id, cb);
+  };
+  
+  api.connectToPeer = function (peer, cb) {
+    rtc.setRemoteDescription(RTCSessionDescription(peer.offer), function () {
+      rtc.createAnswer(function (answerDesc) {
+        rtc.setLocalDescription(answerDesc);
+        // TODO: communicate answerDesc.sdp (and ICE candidates) to the peer somehow
+        call(cb);
+      }, function (e) { call(cb,e); });
+    }, function (e) { call(cb,e); });
   };
   
   api.getPeers = function (cb) {
     function map(doc) {
-      if (doc[PeerPouch._doctypes.offer] && doc.identity !== self.identity) emit(doc.identity, doc.name)
+      if (doc[PeerPouch._doctypes.offer]) emit(doc.identity, doc.name)
     }
     hub.query({map:map}, {include_docs:true}, function (e, d) {
       if (e) cb(e);
-      else cb(null, d.rows.map(function (d) { return d.doc; }));
+      else cb(null, d.rows.filter(function (r) { return r.doc.identity !== self.identity; }).map(function (r) { return r.doc; }));
     });
   };
+  
+  if (!opts.nojoin) api.joinHub();
   
   return api;
 };
