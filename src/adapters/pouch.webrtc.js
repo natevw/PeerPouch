@@ -79,7 +79,7 @@ PeerPouch.valid = function() {
 
 PeerPouch._types = {
   presence: 'com.stemstorage.peerpouch.presence',
-  message: 'com.stemstorage.peerpouch.message',
+  signal: 'com.stemstorage.peerpouch.signal',
   ddoc_name: 'peerpouch-dev'
 }
 
@@ -89,20 +89,24 @@ function _ddoc_replacer(k,v) {
     return JSON.stringify(_t[t]);
   }) : v;
 }
+function _jsonclone(d, r) {
+  return JSON.parse(JSON.stringify(d,r));
+}
 
-PeerPouch._ddoc = JSON.parse(JSON.stringify({
+
+PeerPouch._ddoc = _jsonclone({
   _id: '_design/' + _t.ddoc_name,
   filters: {
     signalling: function (doc, req) {
-      return (doc[_t.presence] || (doc[_t.message] && doc.recipient === req.query.identity));
+      return (doc[_t.presence] || (doc[_t.signal] && doc.recipient === req.query.identity));
     }
   },
   views: {
     peers_by_identity: {
-      map: function (doc) { if (doc[_t.offer]) emit(doc.identity, doc.name); }
+      map: function (doc) { if (doc[_t.presence]) emit(doc.identity, doc.name); }
     }
   }
-}, _ddoc_replacer));
+}, _ddoc_replacer);
 
 PeerPouch.Presence = function(hub, opts) {
   opts || (opts == {});
@@ -113,13 +117,13 @@ PeerPouch.Presence = function(hub, opts) {
   
   // TODO: add concept of "separate" peer groups within a common hub?
   
-  var RTCPeerConnection = window.RTCPeerConnection || webkitRTCPeerConnection || mozRTCPeerConnection;
-  var RTCSessionDescription = window.RTCSessionDescription || webkitRTCSessionDescription || mozRTCSessionDescription;
+  var RTCPeerConnection = window.RTCPeerConnection || webkitRTCPeerConnection || mozRTCPeerConnection,
+      RTCSessionDescription = window.RTCSessionDescription || webkitRTCSessionDescription || mozRTCSessionDescription,
+      RTCIceCandidate = window.RTCIceCandidate || webkitRTCIceCandidate || mozRTCIceCandidate;
   
   // TODO: make ICE (and other channel setup params?) user-configurable
   var cfg = {"iceServers":[{"url":"stun:23.21.150.121"}]},
-      con = { 'optional': [{'DtlsSrtpKeyAgreement': true}, {'RtpDataChannels': true }] },
-      rtc = new RTCPeerConnection(cfg, con);      // TODO: we'll actually need one of these for each connected peer
+      con = { 'optional': [{'DtlsSrtpKeyAgreement': true}, {'RtpDataChannels': true }] };
   // NOTE: createDataChannel needs `open /Applications/Google\ Chrome\ Canary.app --args --enable-data-channels` :-(
   
   var self = {
@@ -128,11 +132,10 @@ PeerPouch.Presence = function(hub, opts) {
     // TODO: see if WebRTC built-in identity provider stuff useful: http://www.ietf.org/proceedings/82/slides/rtcweb-13.pdf
     identity: opts.identity || Math.random().toFixed(20).slice(2),      
     profile: opts.profile || {},
-    shares: Object.keys(opts.shares || {}),
-    offer: null
+    shares: Object.keys(opts.shares || {})
   };
   self.profile.browser = opts.browser || navigator.userAgent.replace(/^.*(Firefox|Chrome|Mobile)\/([0-9.]+).*$/, "$1 $2").replace("Mobile", "Bowser");
-  self[_t.offer] = true;
+  self[_t.presence] = true;
   
   function updateSelf(cb) {
     hub.post(self, function (e,d) {
@@ -142,43 +145,85 @@ PeerPouch.Presence = function(hub, opts) {
     });
   }
   
-  rtc.onnegotiationneeded = function (e) {
-    console.log("Negotiation needed", e);
-  };
+  var peers = Object.create(null);     // *connected* peers
   
-  rtc.onicecandidate = function (e) {
-    console.log("ICE candidate", e.candidate);
-    // TODO: we'll want to have associated our RTCConnection with a *particular* peer by this point!
-    //sendMessage(peer, {}, {answer:answerDesc.sdp}, cb);
-  };
+  function associatedConnection(peer) {
+    var rtc = peers[peer.identity];
+    if (!rtc) {
+      rtc = peers[peer.identity] = new RTCPeerConnection(cfg, con);
+      // NOTE: rtc spec examples want us to use onnegotianneeded to trigger createOffer, but it never seems to fire in Chrome?
+      rtc.onnegotiationneeded = function (e) {console.log(self.identity, "saw negotiation trigger", e); };
+      rtc.onicecandidate = function (evt) {
+        if (evt.candidate) sendSignal(peer, {candidate:_jsonclone(evt.candidate)}, function (e) {
+          if (e) throw e;
+        });
+      };
+      
+      rtc.onicechange = function (e) {
+        console.log(self.identity, "ICE change", rtc.iceGatheringState, rtc.iceConnectionState);
+      }
+      rtc.onstatechange = function (e) {
+        console.log(self.identity, "State change", rtc.signalingState, rtc.readyState)
+      }
+      
+    }
+    return rtc;
+  }
   
-  var peers = {};     // *connected* peers
-  // TODO: once we get an answer, we need to associate our "dangling" offer with a single specific peer.
-  
-  function sendMessage(peer, opts, data, cb) {
+  function sendSignal(peer, data, cb) {
     var msg = {
       sender: self.identity,
       recipient: peer.identity,
       data: data
     };
-    msg[_t.message] = true;
+    msg[_t.signal] = true;
     hub.post(msg, cb);
   }
+  function receiveSignal(peer, data) {
+    console.log(self.identity, "got", data, "from", peer.identity);
+    var rtc = associatedConnection(peer, 'offer');
+    if (data.offer) rtc.setRemoteDescription(new RTCSessionDescription({type:'offer', sdp:data.offer}), function () {
+      console.log(self.identity, "set offer, now creating answer");
+      rtc.createAnswer(function (answerDesc) {
+        console.log(self.identity, "got anwer, sending back to", peer.identity);
+        rtc.setLocalDescription(answerDesc);
+        sendSignal(peer, {answer:answerDesc.sdp});
+      }, function (e) { throw e; });
+    }, function (e) { throw e; });
+    else if (data.answer) rtc.setRemoteDescription(new RTCSessionDescription({type:'answer',sdp:data.answer}), function () {
+      console.log(self.identity, "Successfully set answer");
+    }, function (e) { throw e; });
+    else if (data.candidate) rtc.addIceCandidate(new RTCIceCandidate(data.candidate));
+  }
+  
+  hub.info(function (e,d) {
+    if (e) throw e;
+    var opts = {
+      //filter: _t.ddoc_name+'/signalling',       // see https://github.com/daleharvey/pouchdb/issues/525
+      include_docs: true,
+      continuous:true,
+      since:d.update_seq
+    };
+    opts.onChange = function (d) {
+      var doc = d.doc;
+      if (doc[_t.signal] && doc.recipient === self.identity) {
+        receiveSignal({identity:doc.sender}, doc.data);
+        // HACK: would hub.remove() but this is actually "simpler" due to https://github.com/daleharvey/pouchdb/issues/558
+        hub.post({_id:doc._id,_rev:doc._rev,_deleted:true}, function (e) { if (e) throw JSON.stringify(e); });
+      }
+    };
+    hub.changes(opts);
+  });
+  
   
   var api = {};
   
   // c.f. http://dev.w3.org/2011/webrtc/editor/webrtc.html#simple-peer-to-peer-example
   // …and http://dev.w3.org/2011/webrtc/editor/webrtc.html#peer-to-peer-data-example
   
-  // gets a WebRTC offer and shares it via hub
+  // share our profile via hub
   api.joinHub = function (cb) {
-    // TODO: will need to addStream with dummy media in current Firefox
-    rtc.createOffer(function (offerDesc) {
-        // commented out via https://groups.google.com/d/msg/discuss-webrtc/9zs21EBciNM/AFWN-a7f3BkJ
-        //rtc.setLocalDescription(offerDesc);     // TODO: research why this breaks connectToPeer
-        self.offer = offerDesc.sdp;
-        updateSelf(cb);
-    }, function (e) { call(cb,e); });
+    updateSelf(cb);
   };
   
   api.leaveHub = function (cb) {
@@ -186,16 +231,11 @@ PeerPouch.Presence = function(hub, opts) {
   };
   
   api.connectToPeer = function (peer, cb) {
-    rtc.setRemoteDescription(new RTCSessionDescription({type:'offer', sdp:peer.offer}), function () {
-      rtc.createAnswer(function (answerDesc) {
-        rtc.setLocalDescription(answerDesc);
-        hub.post({
-        
-        }, cb);
-        sendMessage(peer, {}, {answer:answerDesc.sdp}, cb);
-        // TODO: communicate answerDesc.sdp (and ICE candidates) to the peer somehow
-        call(cb);
-      }, function (e) { call(cb,e); });
+    var rtc = associatedConnection(peer);
+    rtc.createOffer(function (offerDesc) {
+        console.log(self.identity, "Created offer, sending to", peer.identity);
+        rtc.setLocalDescription(offerDesc);
+        sendSignal(peer, {offer:offerDesc.sdp}, cb);
     }, function (e) { call(cb,e); });
   };
   
