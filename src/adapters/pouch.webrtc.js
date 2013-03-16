@@ -125,7 +125,8 @@ PeerPouch.Presence = function(hub, opts) {
   var self = {
     _id: 'offer-'+Math.random().toFixed(5).slice(2),
     name: opts.name || "Friendly neighbor",
-    identity: opts.identity || Math.random().toFixed(20).slice(2),
+    // TODO: see if WebRTC built-in identity provider stuff useful: http://www.ietf.org/proceedings/82/slides/rtcweb-13.pdf
+    identity: opts.identity || Math.random().toFixed(20).slice(2),      
     profile: opts.profile || {},
     shares: Object.keys(opts.shares || {}),
     offer: null
@@ -141,13 +142,40 @@ PeerPouch.Presence = function(hub, opts) {
     });
   }
   
+  rtc.onnegotiationneeded = function (e) {
+    console.log("Negotiation needed", e);
+  };
+  
+  rtc.onicecandidate = function (e) {
+    console.log("ICE candidate", e.candidate);
+    // TODO: we'll want to have associated our RTCConnection with a *particular* peer by this point!
+    //sendMessage(peer, {}, {answer:answerDesc.sdp}, cb);
+  };
+  
+  var peers = {};     // *connected* peers
+  // TODO: once we get an answer, we need to associate our "dangling" offer with a single specific peer.
+  
+  function sendMessage(peer, opts, data, cb) {
+    var msg = {
+      sender: self.identity,
+      recipient: peer.identity,
+      data: data
+    };
+    msg[_t.message] = true;
+    hub.post(msg, cb);
+  }
+  
   var api = {};
+  
+  // c.f. http://dev.w3.org/2011/webrtc/editor/webrtc.html#simple-peer-to-peer-example
+  // …and http://dev.w3.org/2011/webrtc/editor/webrtc.html#peer-to-peer-data-example
   
   // gets a WebRTC offer and shares it via hub
   api.joinHub = function (cb) {
-    // TODO: probably need to addStream
+    // TODO: will need to addStream with dummy media in current Firefox
     rtc.createOffer(function (offerDesc) {
-        rtc.setLocalDescription(offerDesc);
+        // commented out via https://groups.google.com/d/msg/discuss-webrtc/9zs21EBciNM/AFWN-a7f3BkJ
+        //rtc.setLocalDescription(offerDesc);     // TODO: research why this breaks connectToPeer
         self.offer = offerDesc.sdp;
         updateSelf(cb);
     }, function (e) { call(cb,e); });
@@ -158,9 +186,13 @@ PeerPouch.Presence = function(hub, opts) {
   };
   
   api.connectToPeer = function (peer, cb) {
-    rtc.setRemoteDescription(RTCSessionDescription(peer.offer), function () {
+    rtc.setRemoteDescription(new RTCSessionDescription({type:'offer', sdp:peer.offer}), function () {
       rtc.createAnswer(function (answerDesc) {
         rtc.setLocalDescription(answerDesc);
+        hub.post({
+        
+        }, cb);
+        sendMessage(peer, {}, {answer:answerDesc.sdp}, cb);
         // TODO: communicate answerDesc.sdp (and ICE candidates) to the peer somehow
         call(cb);
       }, function (e) { call(cb,e); });
