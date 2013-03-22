@@ -160,16 +160,36 @@ PeerPouch.Presence = function(hub, opts) {
   
   var peers = Object.create(null);     // *connected* peers
   
-  function associatedConnection(peer) {
+  function associatedConnection(peer, initiatorCB) {
     var peerInfo = peers[peer.identity];
     if (!peerInfo) {
+      console.log(self.identity, "creating connection for", peer.identity);
       peerInfo = peers[peer.identity] = {};
       
-      var rtc = peerInfo.connection = new RTCPeerConnection(cfg, con),
-          // NOTE: unreliable channel is not our preference, but that's all current FF/Chrome have
-          dc = peerInfo.channel = rtc.createDataChannel('peerpouch-dev', {reliable:false});
-      rtc.onnegotiationneeded = function (e) {
-        var cb = null; // TODO: rework this (separate out create/fetch instead of this now-silly pool cache)
+      // let code below use simple callback, but make sure all interested callers notified
+      peerInfo.callbacks = [initiatorCB];
+      var cb = function () {
+        var ctx = this, args = arguments;
+        peerInfo.callbacks.forEach(function (cb) { if (cb) cb.apply(ctx, args); });
+        delete peerInfo.callbacks;
+        cb = null;
+      }
+      
+      var rtc = peerInfo.connection = new RTCPeerConnection(cfg, con);
+      
+      function setupChannel(evt) {
+        if (evt) console.log(self.identity, "received data channel", evt.channel.readyState);
+        // NOTE: unreliable channel is not our preference, but that's all current FF/Chrome have
+        peerInfo.channel = (evt) ? evt.channel : rtc.createDataChannel('peerpouch-dev', {reliable:false});
+        peerInfo.channel.onopen = function (evt) {
+          console.log(self.identity, "data channel is open");
+          call(cb);
+        }
+      }
+      if (initiatorCB) setupChannel();
+      else rtc.ondatachannel = setupChannel;
+      
+      rtc.onnegotiationneeded = function (evt) {
         console.log(self.identity, "saw negotiation trigger and will create an offer");
         rtc.createOffer(function (offerDesc) {
             console.log(self.identity, "created offer, sending to", peer.identity);
@@ -183,16 +203,18 @@ PeerPouch.Presence = function(hub, opts) {
         });
       };
       // debugging
-      rtc.onicechange = function (e) {
+      rtc.onicechange = function (evt) {
         console.log(self.identity, "ICE change", rtc.iceGatheringState, rtc.iceConnectionState);
       }
-      rtc.onstatechange = function (e) {
+      rtc.onstatechange = function (evt) {
         console.log(self.identity, "State change", rtc.signalingState, rtc.readyState)
       }
-      dc.onopen = function (e) {
-        console.log(self.identity, "data channel is open");
-      }
-    }
+    } else if (peerInfo.callbacks) { 
+      peerInfo.callbacks.push(initiatorCB);
+    } else setTimeout(function () {
+      var e = (peerInfo.channel.readyState === 'open') ? null : Error("Connection exists, but data channel not open!");
+      call(initiatorCB, e);
+    }, 0);
     return peerInfo.connection;
   }
   
@@ -215,8 +237,8 @@ PeerPouch.Presence = function(hub, opts) {
         console.log(self.identity, "got anwer, sending back to", peer.identity);
         rtc.setLocalDescription(answerDesc);
         sendSignal(peer, _jsonclone(answerDesc));
-      }, function (e) { throw e; });
-    }, function (e) { throw e; });
+      }, function (e) { console.warn(self.identity, "couldn't create answer", e); });
+    }, function (e) { console.warn(self.identity, "couldn't set remote description", e) });
     else if (data.candidate) rtc.addIceCandidate(new RTCIceCandidate(data.candidate));
   }
   
@@ -254,9 +276,7 @@ PeerPouch.Presence = function(hub, opts) {
     hub.remove(self._id, cb);
   };
   
-  api.connectToPeer = function (peer, cb) {
-    var rtc = associatedConnection(peer);
-  };
+  api.connectToPeer = associatedConnection;
   
   api.getPeers = function (cb) {
     hub.query(_t.ddoc_name+'/peers_by_identity', {include_docs:true}, function (e, d) {
