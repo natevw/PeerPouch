@@ -90,7 +90,20 @@ function _ddoc_replacer(k,v) {
   }) : v;
 }
 function _jsonclone(d, r) {
-  return JSON.parse(JSON.stringify(d,r));
+  //return JSON.parse(JSON.stringify(d,r));
+  
+  // WORKAROUND: https://code.google.com/p/chromium/issues/detail?id=222982#makechanges
+  if (r) {
+    function toJSON(k, d) {
+      d = r(k, d);
+      if (typeof d === 'object') Object.keys(d).forEach(function (k) {
+        d[k] = toJSON(k,d[k]);
+      });
+      return d;
+    }
+    d = toJSON(null, d);
+  }
+  return JSON.parse(JSON.stringify(d));
 }
 
 
