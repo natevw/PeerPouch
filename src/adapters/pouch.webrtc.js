@@ -140,7 +140,7 @@ PeerPouch.Presence = function(hub, opts) {
   // NOTE: createDataChannel needs `open /Applications/Google\ Chrome\ Canary.app --args --enable-data-channels` :-(
   
   var self = {
-    _id: 'offer-'+Math.random().toFixed(5).slice(2),
+    _id: 'peer-'+Math.random().toFixed(5).slice(2),
     name: opts.name || "Friendly neighbor",
     // TODO: see if WebRTC built-in identity provider stuff useful: http://www.ietf.org/proceedings/82/slides/rtcweb-13.pdf
     identity: opts.identity || Math.random().toFixed(20).slice(2),      
