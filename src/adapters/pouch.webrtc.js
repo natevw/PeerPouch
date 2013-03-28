@@ -173,7 +173,7 @@ PeerPouch.Presence = function(hub, opts) {
         peerInfo.callbacks.forEach(function (cb) { if (cb) cb.apply(ctx, args); });
         delete peerInfo.callbacks;
         cb = null;
-      }
+      };
       
       var rtc = peerInfo.connection = new RTCPeerConnection(cfg, con);
       
@@ -205,10 +205,10 @@ PeerPouch.Presence = function(hub, opts) {
       // debugging
       rtc.onicechange = function (evt) {
         console.log(self.identity, "ICE change", rtc.iceGatheringState, rtc.iceConnectionState);
-      }
+      };
       rtc.onstatechange = function (evt) {
         console.log(self.identity, "State change", rtc.signalingState, rtc.readyState)
-      }
+      };
     } else if (peerInfo.callbacks) { 
       peerInfo.callbacks.push(initiatorCB);
     } else setTimeout(function () {
@@ -283,6 +283,10 @@ PeerPouch.Presence = function(hub, opts) {
       if (e) cb(e);
       else cb(null, d.rows.filter(function (r) { return r.doc.identity !== self.identity; }).map(function (r) { return r.doc; }));
     });
+  };
+  
+  api.makeURL = function (peer, db) {
+    return "webrtc://" + peer.identity + '/' + db;
   };
   
   if (!opts.nojoin) api.joinHub();
