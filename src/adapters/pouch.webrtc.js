@@ -121,7 +121,11 @@ PeerPouch._ddoc = _jsonclone({
   }
 }, _ddoc_replacer);
 
-PeerPouch.Presence = function(hub, opts) {
+PeerPouch.Presence = function(hub, opts, cb) {
+  if (typeof opts === 'function') {
+    cb = opts;
+    opts = {};
+  }
   opts || (opts == {});
   
   // hub is *another* Pouch instance (typically http type) — we'll use that database for communicating presence/offers/answers!
@@ -151,10 +155,21 @@ PeerPouch.Presence = function(hub, opts) {
   self[_t.presence] = true;
   
   function updateSelf(cb) {
+    if (updateSelf.againCallbacks) {
+      updateSelf.againCallbacks.push(cb);
+      return;
+    }
+    updateSelf.againCallbacks = [];
+    self.lastUpdate = new Date().toISOString();
     hub.post(self, function (e,d) {
+      var againCallbacks = updateSelf.againCallbacks;
+      delete updateSelf.againCallbacks;
       if (!e) self._rev = d.rev;
       else console.warn("Trouble sharing presence", e, d);
       call(cb, e, d);
+      if (againCallbacks.length) updateSelf(function (e,d) {
+        againCallbacks.forEach(function (cb) { call(cb,e,d); });
+      });
     });
   }
   
@@ -242,25 +257,34 @@ PeerPouch.Presence = function(hub, opts) {
     else if (data.candidate) rtc.addIceCandidate(new RTCIceCandidate(data.candidate));
   }
   
-  hub.info(function (e,d) {
-    if (e) throw e;
-    var opts = {
-      //filter: _t.ddoc_name+'/signalling',       // see https://github.com/daleharvey/pouchdb/issues/525
-      include_docs: true,
-      continuous:true,
-      since:d.update_seq
+  var changesListener;
+  function listenForChanges() {
+    var cancelListen = false;
+    changesListener = {
+      cancel: function () { cancelListen = true; }
     };
-    opts.onChange = function (d) {
-      var doc = d.doc;
-      if (doc[_t.signal] && doc.recipient === self.identity) {
-        receiveSignal({identity:doc.sender}, doc.data);
-        // HACK: would hub.remove() but this is actually "simpler" due to https://github.com/daleharvey/pouchdb/issues/558
-        hub.post({_id:doc._id,_rev:doc._rev,_deleted:true}, function (e) { if (e) throw JSON.stringify(e); });
-      }
-    };
-    hub.changes(opts);
-  });
-  
+    hub.info(function (e,d) {
+      if (e) throw e;
+      var opts = {
+        //filter: _t.ddoc_name+'/signalling',       // see https://github.com/daleharvey/pouchdb/issues/525
+        include_docs: true,
+        continuous:true,
+        since:d.update_seq
+      };
+      opts.onChange = function (d) {
+        var doc = d.doc;
+        if (doc[_t.signal] && doc.recipient === self.identity) {
+          receiveSignal({identity:doc.sender}, doc.data);
+          // HACK: would hub.remove() but this is actually "simpler" due to https://github.com/daleharvey/pouchdb/issues/558
+          hub.post({_id:doc._id,_rev:doc._rev,_deleted:true}, function (e) { if (e) throw e; });
+        } else if (doc[_t.presence] && doc.identity !== self.identity) {
+          peersChanged(doc);
+        }
+      };
+      if (!cancelListen) changesListener = hub.changes(opts);
+      else changesListener = null;
+    });
+  }
   
   var api = {};
   
@@ -269,27 +293,63 @@ PeerPouch.Presence = function(hub, opts) {
   
   // share our profile via hub
   api.joinHub = function (cb) {
+    delete self._deleted;
     updateSelf(cb);
+    listenForChanges();
   };
   
   api.leaveHub = function (cb) {
-    hub.remove(self._id, cb);
+    self._deleted = true;
+    updateSelf(cb);
+    if (changesListener) changesListener.cancel();
   };
   
   api.connectToPeer = associatedConnection;
   
-  api.getPeers = function (cb) {
+  // TODO: disconnectFromPeer
+  
+  var peerListeners = [];
+  function peersChanged(peer) {
+    peerListeners.forEach(function (cb) {
+      call(cb, peer);
+    });
+  }
+  
+  api.getPeers = function (opts, cb) {
+    if (typeof opts === 'function') {
+      cb = opts;
+      opts = {};
+    }
+    opts || (opts = {});
     hub.query(_t.ddoc_name+'/peers_by_identity', {include_docs:true}, function (e, d) {
       if (e) cb(e);
       else cb(null, d.rows.filter(function (r) { return r.doc.identity !== self.identity; }).map(function (r) { return r.doc; }));
     });
+    
+    var cancelListener = function () {};
+    if (opts.onChange) {      // WARNING/TODO: listener may get changes before cb returns initial list!
+      peerListeners.push(opts.onChange);
+      cancelListener = function () {
+        var cbIdx = peerListeners.indexOf(opts.onChange);
+        if (~cbIdx) peerListeners.splice(cbIdx, 1);
+      }
+    }
+    return {cancel:cancelListener};
+  };
+  
+  // TODO: is this really the best way to tackle changing client info?
+  api.updateInfo = function (newOpts, cb) {
+    // HACK: just update shares as needed for test page
+    //Object.keys(newOpts).forEach(function (k) { opts[k] = newOpts[k]; });
+    self.shares = Object.keys(newOpts.shares || {});
+    updateSelf(cb);
   };
   
   api.makeURL = function (peer, db) {
     return "webrtc://" + peer.identity + '/' + db;
   };
   
-  if (!opts.nojoin) api.joinHub();
+  if (!opts.nojoin) api.joinHub(cb);
   
   return api;
 };
@@ -300,6 +360,10 @@ PeerPouch.Presence.verifyHub = function (hub, opts, cb) {
     opts = {};
   }
   hub.put(PeerPouch._ddoc, function (e,d) {
+    if (e && e.status === 409) {
+      console.warn("Found an existing design doc, proceeding with it…");
+      e = null;
+    }
     // TODO: handle versioning (leave if higher minor, upgrade if lower minor, error if major difference)
     call(cb, e, (e) ? null : {version:'dev'});
   });
