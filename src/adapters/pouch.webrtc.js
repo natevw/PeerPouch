@@ -30,6 +30,12 @@ var PeerPouch = function(opts, callback) {
   
   // Concrete implementations of abstract adapter methods
   
+  // TODO: update this with latest (e.g. _getRevisionTree, _removeDocRevisions)
+  
+  // these should be implemented as very generic simple RPC-type stuff (client here and server in PeerPouch.Presence)
+  // for now don't allow *any* remote code execution — eventually optimize map/reduce to happen in WebWorker but, until then,
+  // instead use dNode-style (IIRC) trick of serializing functions as an ID and then executing back locally when called on remote
+  
   api._info = function(callback) {
     TODO(callback);
   };

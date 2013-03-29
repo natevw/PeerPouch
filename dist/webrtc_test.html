@@ -46,8 +46,7 @@ When it is, you will be able to delegate access to a database accessible locally
 
 <h2>Peers</h2>
 <p>
-To fully connect with peers, you'll need to start Chrome Canary with --enable-data-channels or configure Firefox with <i>things</i>.
-Unfortunately, data connections between Chrome and Firefox are not interoperable yet either.
+To fully connect with peers, you may need some browser settings or pre-release versions and unfortunately, data connections between Chrome and Firefox are not interoperable yet either.
 See the <a href="http://www.webrtc.org/chrome">Chrome</a> / <a href="http://www.webrtc.org/firefox">Firefox</a> / <a href="http://www.webrtc.org/interop">Interop</a> notes on <a href="http://www.webrtc.org/">WebRTC.org</a> for some deets.
 </p>
 <p>
@@ -173,7 +172,7 @@ function updatePeersList() {
     var el = d3.select(this);
     el.classed('action', false).text("attempting…");
     presence.connectToPeer(d, function () {
-      el.text("connected!").style('color', "green");
+      el.text("connected!").style('color', "green");    // TODO: show connection status when peer initiates!
     });
   }).style('display', "block");
   itemsEnter.append('span');
@@ -182,44 +181,6 @@ function updatePeersList() {
   items.exit().remove();
 }
 
-
-throw up;
-
-
-//Pouch.destroy("idb://_allDbs", function () {});
-Pouch.destroy("idb://webrtc-test", function () {
-Pouch("idb://webrtc-test", function (e, hub) {
-    if (e) throw e;
-Pouch.dbgPeerPouch.Presence.verifyHub(hub, function (e, v) {
-    if (e) throw e;
-    
-    var a = Pouch.dbgPeerPouch.Presence(hub, {name:"Alice",identity:'a'}),
-        b = Pouch.dbgPeerPouch.Presence(hub, {name:"Bob",identity:'b'});
-    
-    a.updateInfo({shares:{
-      one: Pouch("websql://webrtc-test1"),
-      two: Pouch("websql://webrtc-test2")
-    }});
-    b.updateInfo({shares:{
-      three: Pouch("websql://webrtc-test3")
-    }});
-    
-    setTimeout(function () {
-      a.getPeers(function (e,d) {
-          if (e) throw e;
-          
-          console.log("Peers are:", d);
-          a.connectToPeer(d[0], function (e) {
-            if (e) throw e;
-            else console.log("Connected!");
-          });
-      });
-    }, 1000);
-    
-    dbgHub = hub, dbgA = a, dbgB = b;
-});   // verifyHub
-});   // Pouch
-});   // destroy
 </script>
 </body>
 </html>
