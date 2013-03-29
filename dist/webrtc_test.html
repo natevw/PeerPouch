@@ -6,14 +6,188 @@
     <!-- supervisor -i dist -n exit `which grunt` -->
     <!-- open /Applications/Google\ Chrome\ Canary.app --args --enable-data-channels -->
     <script src="pouchdb-nightly.js"></script>
+    <script src="http://d3js.org/d3.v3.min.js"></script>
+    <style>
+      a:not([href]):not(.action) { text-decoration: underline; color: lightgrey; }
+      a.action { text-decoration: underline; cursor: pointer; }
+      .dangerous { color: red; }
+      
+      #hubStatus { color: grey; }
+      #hubStatus.ready { color: green; }
+      #hubStatus.error { color: orange; }
+    </style>
 </head>
 <body>
-(Open the console, HAL.)
+
+<h1>PeerPouch: PouchDB-over-WebRTC</h1>
+
+<h2>Hub</h2>
+<p>
+The hub is a "centralized" (shared, anyway) database used for presence and connection setup signalling.
+It can be any PouchDB database accessible by both peers; a design doc will be installed.
+Once the connection is established, database requests are exchanged directly between peers.
+</p>
+Status: <span id=hubStatus>-</span>
+<form id=hubSettings>
+  <input id=hubURL value="idb://webrtc-test"> <button>Join</button>
+  <a id=leaveHub class="action">Leave</a>
+  <a id=resetHub class="dangerous action">Reset</a>
+  <br>
+  <input id=name placeholder="Your alias (optional)">
+</form>
+
+<h2>My shares</h2>
+<p>
+This part isn't really so much implemented…yet!
+When it is, you will be able to delegate access to a database accessible locally, to any peer anywhere!
+</p>
+<ul id=shares></ul>
+<a class=action id=addShare>+ share a database</a>
+
+<h2>Peers</h2>
+<p>
+To fully connect with peers, you'll need to start Chrome Canary with --enable-data-channels or configure Firefox with <i>things</i>.
+Unfortunately, data connections between Chrome and Firefox are not interoperable yet either.
+See the <a href="http://www.webrtc.org/chrome">Chrome</a> / <a href="http://www.webrtc.org/firefox">Firefox</a> / <a href="http://www.webrtc.org/interop">Interop</a> notes on <a href="http://www.webrtc.org/">WebRTC.org</a> for some deets.
+</p>
+<p>
+Also: peers don't tend to do a good job of cleaning themselves up either. We may need to implement something of a heartbeat and toss/ignore stale peers. (…but *carefully* so as not to totally prevent slow gossip-type meshy networks, built using interreplicating PeerPouch instances as the hubs themselves, from springing up!)
+</p>
+<ul id=peers></ul>
+<a class=action id=addPeer>+ add example peer</a>
+
 
 <script>
+var hub, presence, peers,
+    hubStatus = d3.select('#hubStatus');
+function clearHub() {
+  hubStatus.text("leaving").classed('ready', false).classed('error', false);
+  function done() {
+    hubStatus.text("n/a");
+  }
+  if (presence) presence.leaveHub(done);
+  else done();
+  hub = presence = peers = null;
+  updatePeersList();
+}
+function joinHub(url, name, identity) {
+  hubStatus.text("opening").classed('ready', false).classed('error', false);
+  Pouch(url, function (e, db) {
+    if (e) {
+      hubStatus.text("error").classed('error', true);
+      throw e;
+    }
+    hub = db;
+    hubStatus.text("preparing");
+    Pouch.dbgPeerPouch.Presence.verifyHub(hub, function (e, v) {
+      if (e) {
+        hubStatus.text("error").classed('error', true);
+        throw e;
+      }
+      hubStatus.text("joining");
+      presence = Pouch.dbgPeerPouch.Presence(hub, {name:name,identity:identity}, function () {
+        hubStatus.text("ready").classed('ready', true);
+      });
+      
+      peers = [];
+      function handlePeerChange(peer) {
+        var peerIdx = -1;
+        peers.forEach(function (p, i) {
+          if (p.identity === peer.identity) peerIdx = i;
+        });
+        if (~peerIdx && !peer._deleted) peers[peerIdx] = peer;
+        else if (~peerIdx) peers.splice(peerIdx, 1);
+        else if (!peer._deleted) peers.push(peer);
+        // HACK: only update list if we're NOT getting preChangedPeers.forEach'ed
+        if (arguments.length === 1) updatePeersList();
+      }
+      presence.getPeers({onChange:handlePeerChange}, function (e, initialList) {
+        if (e) throw e;
+        var preChangedPeers = peers;
+        peers = initialList;
+        // NOTE: this is potentially ineffecient; we assume preChangedPeers.length ≪ initialList.length
+        preChangedPeers.forEach(handlePeerChange);    
+        updatePeersList();
+      });
+    });
+  });
+}
+clearHub();
+
+d3.select('#hubSettings').on('submit', function () {
+  d3.event.preventDefault();
+  clearHub();
+  
+  var url = d3.select('#hubURL').property('value'),
+      name = d3.select('#name').property('value'),
+      idt = 'peer-'+Math.random().toFixed(16).slice(2);
+  if (!name) {
+    name = 'Peer #' + idt.slice(-4);
+    d3.select('#name').property('value', name);
+  }
+  joinHub(url, name, idt);
+});
+
+d3.select('#resetHub').on('click', function () {
+  d3.event.preventDefault();
+  
+  var hubURL = d3.select('#hubURL').property('value');
+  var really = confirm("This will completely destroy " + hubURL);
+  if (really) {
+    hubStatus.text("destroying").classed('ready', false).classed('error', false);
+    Pouch.destroy("idb://webrtc-test", function (e) {
+      if (e) {
+        hubStatus.text("destroy error").classed('error', true);
+        throw e;
+      }
+      clearHub();
+    });
+  }
+});
+
+d3.select('#leaveHub').on('click', function () {
+  if (d3.event) d3.event.preventDefault();
+  clearHub();
+});
+
+d3.select('#addShare').on('click', function () {
+  if (d3.event) d3.event.preventDefault();
+  alert("Sorry, not yet implemented.");
+});
+
+d3.select('#addPeer').on('click', function () {
+  if (d3.event) d3.event.preventDefault();
+  // TODO: pass along our hubURL…and auto-join?
+  window.open(document.location);
+});
+
+d3.select(window).on('beforeunload', function () {
+  clearHub();     // NOTE: this is likely to fail :-( https://code.google.com/p/chromium/issues/detail?id=144862#c4
+});
+
+function updatePeersList() {
+  var items = d3.select('#peers').selectAll('li').data(peers||[], function (d) { return d.identity; }),
+      itemsEnter = items.enter().append('li');
+  itemsEnter.append('h3');
+  itemsEnter.append('a').classed('action', true).text("pre-connect").on('click', function (d) {
+    var el = d3.select(this);
+    el.classed('action', false).text("attempting…");
+    presence.connectToPeer(d, function () {
+      el.text("connected!").style('color', "green");
+    });
+  }).style('display', "block");
+  itemsEnter.append('span');
+  items.select('h3').text(function (d) { return d.name; });
+  items.select('span').text(function (d) { return d.profile.browser + ", last updated @ " + new Date(d.lastUpdate); });
+  items.exit().remove();
+}
+
+
+throw up;
+
+
 //Pouch.destroy("idb://_allDbs", function () {});
 Pouch.destroy("idb://webrtc-test", function () {
-console.log("destroyed");
 Pouch("idb://webrtc-test", function (e, hub) {
     if (e) throw e;
 Pouch.dbgPeerPouch.Presence.verifyHub(hub, function (e, v) {
@@ -21,6 +195,14 @@ Pouch.dbgPeerPouch.Presence.verifyHub(hub, function (e, v) {
     
     var a = Pouch.dbgPeerPouch.Presence(hub, {name:"Alice",identity:'a'}),
         b = Pouch.dbgPeerPouch.Presence(hub, {name:"Bob",identity:'b'});
+    
+    a.updateInfo({shares:{
+      one: Pouch("websql://webrtc-test1"),
+      two: Pouch("websql://webrtc-test2")
+    }});
+    b.updateInfo({shares:{
+      three: Pouch("websql://webrtc-test3")
+    }});
     
     setTimeout(function () {
       a.getPeers(function (e,d) {
