@@ -105,6 +105,7 @@ PeerPouch.valid = function() {
 PeerPouch._types = {
   presence: 'com.stemstorage.peerpouch.presence',
   signal: 'com.stemstorage.peerpouch.signal',
+  share: 'com.stemstorage.peerpouch.share',
   ddoc_name: 'peerpouch-dev'
 }
 
@@ -464,16 +465,100 @@ if (typeof module !== 'undefined' && module.exports) {
 Pouch.adapter('webrtc', PeerPouch);
 
 
-var SharePouch = function (db) {
-  // this plugin's methods are to be used on the **hub** database
+var SharePouch = function (hub) {
+  // NOTE: this plugin's methods are intended for use only on a **hub** database
   
-  var watcherCount;                   // we'll need to watch changes (for signals and/or shares) on `db` whenever this is > 0
+  // this chunk of code manages a combined _changes listener on hub for any share/signal(/etc.) watchers
+  var watcherCount = 0,     // easier to refcount than re-count!
+      watchersByType = Object.create(null),
+      changesListener = null;
+  function addWatcher(type, cb) {
+    var watchers = watchersByType[type] || (watchersByType[type] = []);
+    watchers.push(cb);
+    watcherCount += 1;
+    if (watcherCount > 0 && !changesListener) {     // start listening for changes (at current sequence)
+      var cancelListen = false;
+      changesListener = {
+        cancel: function () { cancelListen = true; }
+      };
+      hub.info(function (e,d) {
+        if (e) throw e;
+        var opts = {
+          //filter: _t.ddoc_name+'/signalling',       // see https://github.com/daleharvey/pouchdb/issues/525
+          include_docs: true,
+          continuous:true,
+          since:d.update_seq
+        };
+        opts.onChange = function (d) {
+          Object.keys(watchersByType).forEach(function (type) {
+            var watchers = watchersByType[type];
+            if (d.doc[type] && watchers) watchers.forEach(function (cb) { call(cb, d.doc); });
+          });
+        };
+        if (!cancelListen) changesListener = hub.changes(opts);
+        else changesListener = null;
+      });
+    }
+    return {cancel: function () { removeWatcher(type, cb); }};
+  }
+  function removeWatcher(type, cb) {
+    var watchers = watchersByType[type],
+        cbIdx = (watchers) ? watchers.indexOf(cb) : -1;
+    if (~cbIdx) {
+      watchers.splice(cbIdx, 1);
+      watcherCount -= 1;
+    }
+    if (watcherCount < 1 && changesListener) {
+      changesListener.cancel();
+      changesListener = null;
+    }
+  }
   
-  function share(db, opts, cb) {}     // opts like name, peer profile, etc.
+  var sharesByRemoteId = Object.create(null),     // ._id of share doc
+      sharesByLocalId = Object.create(null);      // .id() of database
+  function share(db, opts, cb) {
+    if (typeof opts === 'function') {
+      cb = opts;
+      opts = {};
+    } else opts || (opts = {});
+    
+    var share = {
+      _id: 'share-'+Math.uuid(),
+      name: opts.name || null,
+      info: opts.info || null
+    };
+    hub.post(share, function (e, d) {
+      if (!e) share._rev = d.rev;
+      call(cb, e, d);
+    });
+    share._signalWatcher = addWatcher(_t.signal, function (signal) {
+      if (signal.recipient !== share._id) return;
+      // TODO: *alllllll* the PeerConnection stuff :-P
+    });
+    sharesByRemoteId[share._id] = sharesByLocalId[db.id()] = share;
+  }
+  function unshare(db, cb) {      // TODO: call this automatically from _delete hook whenever it sees a previously shared db?
+    var share = sharesByLocalId[db.id()];
+    hub.post({_id:share._id,_rev:share._rev,_deleted:true}, cb);
+    share._signalWatcher.cancel();
+    delete sharesByRemoteId[share._id];
+    delete sharesByLocalId[db.id()];
+  }
   
-  function unshare(db, cb) {}         // TODO: call from _delete hook whenever it sees a previously shared db?
-  
-  function getShares(opts, cb) {}     // opts can include watcher, as in PeerPouch
+  function getShares(opts, cb) {
+    if (typeof opts === 'function') {
+      cb = opts;
+      opts = {};
+    }
+    opts || (opts = {});
+    hub.query(_t.ddoc_name+'/shares', {include_docs:true}, function (e, d) {
+      if (e) cb(e);
+      else cb(null, d.rows.filter(function (r) { return !(r.doc._id in sharesById); }).map(function (r) { return r.doc; }));
+    });
+    if (opts.onChange) {      // WARNING/TODO: listener may get changes before cb returns initial list!
+      return addWatcher(_t.share, opts.onChange);
+    }
+  }
   
   return {shareDatabase:share, unshareDatabase:unshare, getSharedDatabases:getShares};
 }
