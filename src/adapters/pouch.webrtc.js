@@ -35,6 +35,7 @@ var PeerPouch = function(opts, callback) {
   // these should be implemented as very generic simple RPC-type stuff (client here and server in PeerPouch.Presence)
   // for now don't allow *any* remote code execution — eventually optimize map/reduce to happen in WebWorker but, until then,
   // instead use dNode-style (IIRC) trick of serializing functions as an ID and then executing back locally when called on remote
+  // (how to handle synchronous map/reduce functions?)
   
   api._info = function(callback) {
     TODO(callback);
@@ -204,8 +205,12 @@ PeerPouch.Presence = function(hub, opts, cb) {
         peerInfo.channel = (evt) ? evt.channel : rtc.createDataChannel('peerpouch-dev', {reliable:false});
         peerInfo.channel.onopen = function (evt) {
           console.log(self.identity, "data channel is open");
-          call(cb);
-        }
+          call(cb, null, peer);
+        };
+        peerInfo.channel.onmessage = function (evt) {
+            console.log("Received message!", evt);
+            receiveMessage(peer, JSON.parse(evt.data));
+        };
       }
       if (initiatorCB) setupChannel();
       else rtc.ondatachannel = setupChannel;
@@ -219,9 +224,7 @@ PeerPouch.Presence = function(hub, opts, cb) {
         }, function (e) { call(cb,e); });
       };
       rtc.onicecandidate = function (evt) {
-        if (evt.candidate) sendSignal(peer, {candidate:_jsonclone(evt.candidate)}, function (e) {
-          if (e) throw e;
-        });
+        if (evt.candidate) sendSignal(peer, {candidate:_jsonclone(evt.candidate)});
       };
       // debugging
       rtc.onicechange = function (evt) {
@@ -239,14 +242,27 @@ PeerPouch.Presence = function(hub, opts, cb) {
     return peerInfo.connection;
   }
   
-  function sendSignal(peer, data, cb) {
+  // "messages" are peer-to-peer
+  function sendMessage(peer, data) {
+      var peerInfo = peers[peer.identity];
+      if (!peerInfo) throw Error("Not connected to peer!");
+      peerInfo.channel.send(JSON.stringify(data));
+  }
+  function receiveMessage(peer, data) {
+      if (data.type === 'rpc') {
+      
+      }
+  }
+  
+  // "signals" are through centralized hub
+  function sendSignal(peer, data) {
     var msg = {
       sender: self.identity,
       recipient: peer.identity,
       data: data
     };
     msg[_t.signal] = true;
-    hub.post(msg, cb);
+    hub.post(msg, function (e) { if (e) throw e; });
   }
   function receiveSignal(peer, data) {
     console.log(self.identity, "got", data, "from", peer.identity);
@@ -311,6 +327,8 @@ PeerPouch.Presence = function(hub, opts, cb) {
   };
   
   api.connectToPeer = associatedConnection;
+  
+  api.sendToPeer = sendMessage;
   
   // TODO: disconnectFromPeer
   

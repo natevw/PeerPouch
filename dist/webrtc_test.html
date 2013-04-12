@@ -173,6 +173,7 @@ function updatePeersList() {
     el.classed('action', false).text("attempting…");
     presence.connectToPeer(d, function () {
       el.text("connected!").style('color', "green");    // TODO: show connection status when peer initiates!
+      presence.sendToPeer(d, {testing:123});
     });
   }).style('display', "block");
   itemsEnter.append('span');
