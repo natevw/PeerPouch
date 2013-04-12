@@ -463,4 +463,26 @@ if (typeof module !== 'undefined' && module.exports) {
 // Register for our scheme
 Pouch.adapter('webrtc', PeerPouch);
 
+
+var HubPouch = function (db) {
+  // this plugin's methods are to be used on the **hub** database
+  
+  var watcherCount;                   // we'll need to watch changes (for signals and/or shares) on `db` whenever this is > 0
+  
+  function share(db, opts, cb) {}     // opts like name, peer profile, etc.
+  
+  function unshare(db, cb) {}         // TODO: call from _delete hook whenever it sees a previously shared db?
+  
+  function getShares(opts, cb) {}     // opts can include watcher, as in PeerPouch
+  
+  return {share:share, unshare:unshare, getShares:getShares};
+}
+
+HubPouch._delete = function () {};      // blindly called by Pouch.destroy
+
+
+Pouch.plugin('hub', HubPouch);
+
+
+
 Pouch.dbgPeerPouch = PeerPouch;
