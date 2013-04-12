@@ -3,6 +3,24 @@
 
 "use strict";
 
+
+/*
+  Design questions:
+  - method of sharing databases
+  - method of connecting to database
+  - peer URL includes hub? "rtc://hub/peer"
+  - expose shares via presence or on connect?
+  - presence for peers or presence for databases?
+  - role of hub apart from signalling, i.e. presence
+  - handling of remote procedure stuff
+  - handling of security/permissions/validation
+  
+  Options:
+  - expose presence/connections controller to user (current code, ±)
+  - hide all connections setup, expose only via adapter (for connecting) and plugin (for sharing)
+*/
+
+
 // Implements the API for dealing with a PouchDB peer's database over WebRTC
 var PeerPouch = function(opts, callback) {
   function TODO(callback) {
@@ -250,9 +268,50 @@ PeerPouch.Presence = function(hub, opts, cb) {
   }
   function receiveMessage(peer, data) {
       if (data.type === 'rpc') {
-      
+          _rpc_recv(peer, data.fn, data.args);
       }
   }
+  
+  var _rpc_local = Object.create(null);
+  function _rpc_send(peer, fn, args) {
+    sendMessage(peer, {
+      type:'rpc', fn:fn,
+      args: JSON.stringify(args, function (k,v) {
+        if (typeof v === 'function') {
+          var id = Math.uuid();
+          // TODO: we need a cleanup strategy
+          // https://github.com/TooTallNate/node-weak (node.js only)
+          // http://wiki.ecmascript.org/doku.php?id=strawman:weak_refs (ES-never)
+          // hacky idea: mark functions we expect to be called only once, assume heartbeat within a timeout for the rest?
+          _rpc_local[id] = v;
+          v = {__rpc:id};
+        }
+        return v;
+      })
+    });
+  }
+  function _rpc_recv(peer, fn, args) {
+    _rpc_local[fn].apply(null, JSON.parse(args, function (k,v) {
+      if (v.__rpc) {
+        var _rpc_id = v.__rpc;
+        v = function () {     // IMPORTANT: when this is GC'ed the remote should remove _rpc_id from its _rpc_local
+          _rpc_send(peer, _rpc_id, arguments);
+        };
+      }
+      return v;
+    }));
+  }
+  
+  // TODO: implement this bootstrapping stuff somewhere
+  /*
+  _rpc_local['__db__'] = function (db, methods) {
+    // register (/unregister) locally
+  };
+  _rpc_send(peer, '__db__', ["dbname", {
+    get: function () {},
+    put: function () {}
+  }]);
+  */
   
   // "signals" are through centralized hub
   function sendSignal(peer, data) {
@@ -364,8 +423,8 @@ PeerPouch.Presence = function(hub, opts, cb) {
   // TODO: is this really the best way to tackle changing client info?
   api.updateInfo = function (newOpts, cb) {
     // HACK: just update shares as needed for test page
-    //Object.keys(newOpts).forEach(function (k) { opts[k] = newOpts[k]; });
-    self.shares = Object.keys(newOpts.shares || {});
+    Object.keys(newOpts).forEach(function (k) { opts[k] = newOpts[k]; });
+    self.shares = Object.keys(opts.shares || {});
     updateSelf(cb);
   };
   
