@@ -545,7 +545,7 @@ var SharePouch = function (hub) {
     delete sharesByLocalId[db.id()];
   }
   
-  function getShares(opts, cb) {
+  function getShares(opts, cb) {          // TODO: wrap callbacks to set local .dbname property on each visible share
     if (typeof opts === 'function') {
       cb = opts;
       opts = {};
