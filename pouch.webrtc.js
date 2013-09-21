@@ -220,10 +220,8 @@ var SharePouch = function (hub) {
                     since:d.update_seq
                 };
                 opts.onChange = function (d) {
-                    Object.keys(watchersByType).forEach(function (type) {
-                        var watchers = watchersByType[type];
-                        if (d.doc[type] && watchers) watchers.forEach(function (cb) { cb(d.doc); });
-                    });
+                    var watchers = watchersByType[d.doc.type];
+                    if (watchers) watchers.forEach(function (cb) { cb(d.doc); });
                 };
                 if (!cancelListen) changesListener = hub.changes(opts);
                 else changesListener = null;
@@ -254,10 +252,10 @@ var SharePouch = function (hub) {
         
         var share = {
             _id: 'share-'+Pouch.uuid(),
+            type: _t.share,
             name: opts.name || null,
             info: opts.info || null
         };
-        share[_t.share] = true;
         hub.post(share, function (e,d) {
             if (!e) share._rev = d.rev;
             if (cb) cb(e,d);
@@ -272,9 +270,7 @@ var SharePouch = function (hub) {
             if (!handler) {
                 handler = peerHandlers[peer] = new PeerConnectionHandler({initiate:false, _self:self, _peer:peer});
                 handler.onhavesignal = function sendSignal(evt) {
-                    var msg = {sender:self, recipient:peer, data:evt.signal};
-                    msg[_t.signal] = true;
-                    hub.post(msg, function (e) { if (e) throw e; });
+                    hub.post({type:_t.signal, sender:self, recipient:peer, data:evt.signal}, function (e) { if (e) throw e; });
                 };
                 handler.onreceivemessage = function receiveMessage(evt) {
                     // TODO: *alllllll* the RPC stuff ;-)
