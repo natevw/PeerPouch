@@ -288,7 +288,7 @@ PeerPouch.Presence = function(hub, opts, cb) {
             type:'rpc', fn:fn,
             args: JSON.stringify(args, function (k,v) {
                 if (typeof v === 'function') {
-                    var id = Math.uuid();
+                    var id = Pouch.uuid();
                     // TODO: we need a cleanup strategy
                     // https://github.com/TooTallNate/node-weak (node.js only)
                     // http://wiki.ecmascript.org/doku.php?id=strawman:weak_refs (ES-never)
@@ -607,7 +607,7 @@ var SharePouch = function (hub) {
         } else opts || (opts = {});
         
         var share = {
-            _id: 'share-'+Math.uuid(),
+            _id: 'share-'+Pouch.uuid(),
             name: opts.name || null,
             info: opts.info || null
         };
