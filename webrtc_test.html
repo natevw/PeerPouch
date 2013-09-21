@@ -42,6 +42,7 @@ queue()
     var listener = hub.getSharedDatabases({onChange:function (d) {
         console.log("hub.getSharedDatabases change", d);
         listener.cancel();
+console.log("Trying to connect to", d._id, d.dbname);
         PouchDB(d.dbname, function (e,remote) {
             if (e) throw e;
             console.log("Opened remote", remote);

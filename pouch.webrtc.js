@@ -32,13 +32,26 @@ var PeerPouch = function(opts, callback) {
         if (callback) setTimeout(function () { callback(Pouch.Errors.NOT_IMPLEMENTED); }, 0);
     }
     
-    console.log("PEERPOUCH?", PeerPouch._sharePouches[opts.name]);
+    var _init = PeerPouch._shareInitializersByName[opts.name];
+    if (!_init) throw Error("Unknown PeerPouch share dbname");      // TODO: use callback instead?
     
-    
-    // expect we'll need: basic identity for available peers, share per-peer connections between db instances
+    var handler = _init(function (e,d) {
+        console.log("_share.initiateHandler result", e,d);
+        TODO(callback);
+    });
     
     // Our concrete adapter implementations and any additional public api
     var api = {};
+    
+    handler.onconnection = function () {
+        if (callback) callback(null, api);
+        handler.sendMessage("SYN");
+    };
+    handler.onreceivemessage = function receiveMessage(evt) {
+        // TODO: RPC stuff!
+        console.log("Telegram, noble peer", evt.data);
+        if (evt.data.length < 1000) handler.sendMessage("YAK "+evt.data);
+    };
     
     // Use the peer's ID (prefixed?)
     api._id = function() {
@@ -121,14 +134,21 @@ Pouch.adapter('webrtc', PeerPouch);
 
 
 function PeerConnectionHandler(opts) {
+    var cfg = {"iceServers":[{"url":"stun:23.21.150.121"}]},
+        con = { 'optional': [{'DtlsSrtpKeyAgreement': true}, {'RtpDataChannels': true }] };
+    var RTCPeerConnection = window.RTCPeerConnection || webkitRTCPeerConnection || mozRTCPeerConnection,
+        RTCSessionDescription = window.RTCSessionDescription || webkitRTCSessionDescription || mozRTCSessionDescription,
+        RTCIceCandidate = window.RTCIceCandidate || webkitRTCIceCandidate || mozRTCIceCandidate;
+
     this._rtc = new RTCPeerConnection(cfg, con);
     
     this.LOG_SELF = opts._self;
     this.LOG_PEER = opts._peer;
     this._channel = null;
     
-    this.onhavesignal = null;             // caller MUST provide this
-    this.onreceivemessage = null;     // caller SHOULD provide this
+    this.onhavesignal = null;       // caller MUST provide this
+    this.onreceivemessage = null;   // caller SHOULD provide this
+    this.onconnection = null;       // …and maybe this
     
     var handler = this, rtc = this._rtc;
     if (opts.initiate) this._setupChannel();
@@ -136,9 +156,9 @@ function PeerConnectionHandler(opts) {
     rtc.onnegotiationneeded = function (evt) {
         console.log(handler.LOG_SELF, "saw negotiation trigger and will create an offer");
         rtc.createOffer(function (offerDesc) {
-                console.log(handler.LOG_SELF, "created offer, sending to", handler.LOG_PEER);
-                rtc.setLocalDescription(offerDesc);
-                handler._sendSignal(offerDesc);
+            console.log(handler.LOG_SELF, "created offer, sending to", handler.LOG_PEER);
+            rtc.setLocalDescription(offerDesc);
+            handler._sendSignal(offerDesc);
         }, function (e) { console.warn(handler.LOG_SELF, "failed to create offer", e); });
     };
     rtc.onicecandidate = function (evt) {
@@ -155,17 +175,17 @@ function PeerConnectionHandler(opts) {
 
 PeerConnectionHandler.prototype._sendSignal = function (data) {
     if (!this.onhavesignal) throw Error("Need to send message but `onhavesignal` handler is not set.");
-    this.onhavesignal({target:this, signal:_jsonclone(data)});
+    this.onhavesignal({target:this, signal:JSON.parse(JSON.stringify(data))});
 };
 
 PeerConnectionHandler.prototype.receiveSignal = function (data) {
     var handler = this, rtc = this._rtc;
-    //console.log(this.LOG_SELF, "got", data, "from", this.LOG_PEER);
+    console.log(this.LOG_SELF, "got data", data, "from", this.LOG_PEER);
     if (data.sdp) rtc.setRemoteDescription(new RTCSessionDescription(data), function () {
         var needsAnswer = (rtc.remoteDescription.type == 'offer');
-        //console.log(this.LOG_SELF, "set offer, now creating answer:", needsAnswer);
+        console.log(handler.LOG_SELF, "set offer, now creating answer:", needsAnswer);
         if (needsAnswer) rtc.createAnswer(function (answerDesc) {
-            //console.log(this.LOG_SELF, "got anwer, sending back to", this.LOG_PEER);
+            console.log(handler.LOG_SELF, "got anwer, sending back to", handler.LOG_PEER);
             rtc.setLocalDescription(answerDesc);
             handler._sendSignal(answerDesc);
         }, function (e) { console.warn(handler.LOG_SELF, "couldn't create answer", e); });
@@ -175,7 +195,8 @@ PeerConnectionHandler.prototype.receiveSignal = function (data) {
 
 PeerConnectionHandler.prototype.sendMessage = function (data) {
     if (!this._channel || this._channel.readyState !== 'open') throw Error("Connection exists, but data channel is not open.");
-    // TODO: this._channel.send(something)
+    console.log("Attempting message send of length", data.length);
+    this._channel.send(data);
 };
 
 PeerConnectionHandler.prototype._setupChannel = function (evt) {
@@ -184,14 +205,14 @@ PeerConnectionHandler.prototype._setupChannel = function (evt) {
     // NOTE: unreliable channel is not our preference, but that's all current FF/Chrome have
     this._channel = (evt) ? evt.channel : rtc.createDataChannel('peerpouch-dev', {reliable:false});
     this._channel.onopen = function (evt) {
-        console.log(this.LOG_SELF, "data channel is open");
-        // … how best to celebrate? …
+        console.log(handler.LOG_SELF, "DATA CHANNEL IS OPEN");
+        if (handler.onconnection) handler.onconnection(handler._channel);        // BOOM!
     };
     this._channel.onmessage = function (evt) {
-            console.log(handler.LOG_SELF, "received message!", evt);
-            if (!this.onreceivemessage) return;
-            handler.onreceivemessage({target:handler, message:JSON.parse(evt.data)});
+        console.log(handler.LOG_SELF, "received message!", evt);
+        if (handler.onreceivemessage) handler.onreceivemessage({target:handler, data:evt.data});
     };
+    window.dbgChannel = this._channel;
 }
 
 
@@ -270,13 +291,15 @@ var SharePouch = function (hub) {
             if (!handler) {
                 handler = peerHandlers[peer] = new PeerConnectionHandler({initiate:false, _self:self, _peer:peer});
                 handler.onhavesignal = function sendSignal(evt) {
-                    hub.post({type:_t.signal, sender:self, recipient:peer, data:evt.signal}, function (e) { if (e) throw e; });
+                    hub.post({_id:'s-signal-'+Pouch.uuid(), type:_t.signal, sender:self, recipient:peer, data:evt.signal}, function (e) { if (e) throw e; });
                 };
                 handler.onreceivemessage = function receiveMessage(evt) {
+                    console.log("Telegram, sir", evt.data);
+                    if (evt.data.length < 1000) handler.sendMessage("ACK "+evt.data);
                     // TODO: *alllllll* the RPC stuff ;-)
                 };
             }
-            handler.receiveSignal(signal);
+            handler.receiveSignal(signal.data);
         });
         sharesByRemoteId[share._id] = sharesByLocalId[db.id()] = share;
     }
@@ -288,15 +311,25 @@ var SharePouch = function (hub) {
         delete sharesByLocalId[db.id()];
     }
     
-    function _localShare(doc) {
+    function _localizeShare(doc) {
         var name = [hub.id(),doc._id].map(encodeURIComponent).join('/');
-        if (doc._deleted) delete PeerPouch._sharePouches[name];
-        else PeerPouch._sharePouches[name] = {hub:hub, peer:doc._id};
+        if (doc._deleted) delete PeerPouch._shareInitializersByName[name];
+        else PeerPouch._shareInitializersByName[name] = function () {
+            var client = 'peer-'+Pouch.uuid(), share = doc._id,
+                handler = new PeerConnectionHandler({initiate:true, _self:client, _peer:share});
+            handler.onhavesignal = function sendSignal(evt) {
+                hub.post({_id:'p-signal-'+Pouch.uuid(), type:_t.signal, sender:client, recipient:share, data:evt.signal}, function (e) { if (e) throw e; });
+            };
+            addWatcher(_t.signal, function receiveSignal(signal) {
+                if (signal.recipient === client && signal.sender === share) handler.receiveSignal(signal.data);
+            });
+            return handler;     /* for .onreceivemessage and .sendMessage use */
+        };
         doc.dbname = 'webrtc://'+name;
         return doc;
     }
     
-    function getShares(opts, cb) {                    // TODO: wrap callbacks to set local .dbname property on each visible share
+    function getShares(opts, cb) {
         if (typeof opts === 'function') {
             cb = opts;
             opts = {};
@@ -305,17 +338,17 @@ var SharePouch = function (hub) {
         //hub.query(_t.ddoc_name+'/shares', {include_docs:true}, function (e, d) {
         hub.allDocs({include_docs:true}, function (e,d) {
             if (e) cb(e);
-            else cb(null, d.rows.filter(function (r) { return !(r.doc._id in sharesByRemoteId); }).map(function (r) { return _localShare(r.doc); }));
+            else cb(null, d.rows.filter(function (r) { return !(r.doc._id in sharesByRemoteId); }).map(function (r) { return _localizeShare(r.doc); }));
         });
         if (opts.onChange) {            // WARNING/TODO: listener may get changes before cb returns initial list!
-            return addWatcher(_t.share, function (doc) { if (!(doc._id in sharesByRemoteId)) opts.onChange(_localShare(doc)); });
+            return addWatcher(_t.share, function (doc) { if (!(doc._id in sharesByRemoteId)) opts.onChange(_localizeShare(doc)); });
         }
     }
     
     return {shareDatabase:share, unshareDatabase:unshare, getSharedDatabases:getShares};
 }
 
-PeerPouch._sharePouches = Object.create(null);  // used to globally map share.dbname strings to hub/peer objects
+PeerPouch._shareInitializersByName = Object.create(null);           // global connection between new PeerPouch (client) and source SharePouch (hub)
 
 SharePouch._delete = function () {};            // blindly called by Pouch.destroy
 
