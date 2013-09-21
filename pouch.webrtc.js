@@ -133,9 +133,9 @@ var _t = PeerPouch._types;         // local alias for brevitation…
 Pouch.adapter('webrtc', PeerPouch);
 
 
-var RTCPeerConnection = mozRTCPeerConnection || window.RTCPeerConnection || webkitRTCPeerConnection,
-    RTCSessionDescription = mozRTCSessionDescription || window.RTCSessionDescription || webkitRTCSessionDescription,
-    RTCIceCandidate = mozRTCIceCandidate || window.RTCIceCandidate || webkitRTCIceCandidate;
+var RTCPeerConnection = window.mozRTCPeerConnection || window.RTCPeerConnection || window.webkitRTCPeerConnection,
+    RTCSessionDescription = window.mozRTCSessionDescription || window.RTCSessionDescription || window.webkitRTCSessionDescription,
+    RTCIceCandidate = window.mozRTCIceCandidate || window.RTCIceCandidate || window.webkitRTCIceCandidate;
 
 function PeerConnectionHandler(opts) {
     var cfg = {"iceServers":[{"url":"stun:23.21.150.121"}]},
