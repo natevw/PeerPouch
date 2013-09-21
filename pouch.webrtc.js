@@ -292,10 +292,12 @@ var SharePouch = function (hub) {
         delete sharesByLocalId[db.id()];
     }
     
-    function _localShare(shareDoc) {
-        var name = [hub.id(),shareDoc._id].map(encodeURIComponent).join('/');
-        PeerPouch._sharePouches[name] = {hub:hub, peer:shareDoc._id};
-        return {dbname:'webrtc://'+name};
+    function _localShare(doc) {
+        var name = [hub.id(),doc._id].map(encodeURIComponent).join('/');
+        if (doc._deleted) delete PeerPouch._sharePouches[name];
+        else PeerPouch._sharePouches[name] = {hub:hub, peer:doc._id};
+        doc.dbname = 'webrtc://'+name;
+        return doc;
     }
     
     function getShares(opts, cb) {                    // TODO: wrap callbacks to set local .dbname property on each visible share
