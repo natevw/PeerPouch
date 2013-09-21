@@ -508,7 +508,7 @@ function PeerConnectionHandler(opts) {
 }
 
 PeerConnectionHandler.prototype._sendSignal = function (data) {
-    if (!this.onhavesignal) throw Error("Need to send message but `onhavesignal` handler is set.");
+    if (!this.onhavesignal) throw Error("Need to send message but `onhavesignal` handler is not set.");
     this.onhavesignal({target:this, signal:_jsonclone(data)});
 };
 
