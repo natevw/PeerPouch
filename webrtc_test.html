@@ -28,16 +28,24 @@ var HUB_URL = "http://peerpouch-test.ipcalf.com",
     SHARE_URL = "idb://peerpouch-test";
 
 queue()
-    .defer(Pouch, HUB_URL)
-    .defer(Pouch, SHARE_URL)
+    .defer(PouchDB, HUB_URL)
+    .defer(PouchDB, SHARE_URL)
 .await(function (e, hub, share) {
     if (e) throw e;
+    
+    // share our local database
     hub.shareDatabase(share, function (e,d) {
         console.log("hub.shareDatabase result", e,d);
     });
     
-    hub.getSharedDatabases({onChange:function (d) {
+    // and open whichever other database gets shared next
+    var listener = hub.getSharedDatabases({onChange:function (d) {
         console.log("hub.getSharedDatabases change", d);
+        listener.cancel();
+        PouchDB(d.dbname, function (e,remote) {
+            if (e) throw e;
+            console.log("Opened remote", remote);
+        });
     }}, function (){/*ignore existing*/});
 });
 
