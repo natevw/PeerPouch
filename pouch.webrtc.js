@@ -213,6 +213,9 @@ PeerConnectionHandler.prototype._setupChannel = function (evt) {
         console.log(handler.LOG_SELF, "received message!", evt);
         if (handler.onreceivemessage) handler.onreceivemessage({target:handler, data:evt.data});
     };
+    if (window.mozRTCPeerConnection) setTimeout(function () {
+        rtc.onnegotiationneeded();     // FF doesn't trigger this for us like Chrome does
+    }, 0);
     window.dbgChannel = this._channel;
 }
 
