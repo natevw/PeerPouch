@@ -136,9 +136,9 @@ Pouch.adapter('webrtc', PeerPouch);
 function PeerConnectionHandler(opts) {
     var cfg = {"iceServers":[{"url":"stun:23.21.150.121"}]},
         con = { 'optional': [{'DtlsSrtpKeyAgreement': true}, {'RtpDataChannels': true }] };
-    var RTCPeerConnection = window.RTCPeerConnection || webkitRTCPeerConnection || mozRTCPeerConnection,
-        RTCSessionDescription = window.RTCSessionDescription || webkitRTCSessionDescription || mozRTCSessionDescription,
-        RTCIceCandidate = window.RTCIceCandidate || webkitRTCIceCandidate || mozRTCIceCandidate;
+    var RTCPeerConnection = mozRTCPeerConnection || window.RTCPeerConnection || webkitRTCPeerConnection,
+        RTCSessionDescription = mozRTCSessionDescription || window.RTCSessionDescription || webkitRTCSessionDescription,
+        RTCIceCandidate = mozRTCIceCandidate || window.RTCIceCandidate || webkitRTCIceCandidate;
 
     this._rtc = new RTCPeerConnection(cfg, con);
     
