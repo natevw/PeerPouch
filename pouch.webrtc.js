@@ -611,6 +611,7 @@ var SharePouch = function (hub) {
             name: opts.name || null,
             info: opts.info || null
         };
+        share[_t.share] = true;
         hub.post(share, function (e, d) {
             if (!e) share._rev = d.rev;
             call(cb, e, d);
@@ -651,12 +652,13 @@ var SharePouch = function (hub) {
             opts = {};
         }
         opts || (opts = {});
-        hub.query(_t.ddoc_name+'/shares', {include_docs:true}, function (e, d) {
+        //hub.query(_t.ddoc_name+'/shares', {include_docs:true}, function (e, d) {
+        hub.allDocs({include_docs:true}, function (e,d) {
             if (e) cb(e);
-            else cb(null, d.rows.filter(function (r) { return !(r.doc._id in sharesById); }).map(function (r) { return r.doc; }));
+            else cb(null, d.rows.filter(function (r) { return !(r.doc._id in sharesByRemoteId); }).map(function (r) { return r.doc; }));
         });
         if (opts.onChange) {            // WARNING/TODO: listener may get changes before cb returns initial list!
-            return addWatcher(_t.share, opts.onChange);
+            return addWatcher(_t.share, function (doc) { if (!(doc._id in sharesByRemoteId)) opts.onChange(doc); });
         }
     }
     
