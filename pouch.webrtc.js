@@ -20,6 +20,15 @@
     - hide all connections setup, expose only via adapter (for connecting) and plugin (for sharing)
 */
 
+function call(cb) {     // TODO: remove use of this old helper!
+    // based on https://github.com/daleharvey/pouchdb/blob/master/src/pouch.utils.js#L52
+    if (cb) cb.apply(this, Array.prototype.slice.call(arguments, 1));
+}
+
+// a couple additional errors we use
+Pouch.Errors.NOT_IMPLEMENTED = {status:501, error:'not_implemented', reason:"Unable to fulfill the request"};       // [really for METHODs only?]
+Pouch.Errors.FORBIDDEN = {status:403, error:'forbidden', reason:"The request was refused"};
+
 
 // Implements the API for dealing with a PouchDB peer's database over WebRTC
 var PeerPouch = function(opts, callback) {
@@ -120,7 +129,7 @@ function _jsonclone(d, r) {
     
     // WORKAROUND: https://code.google.com/p/chromium/issues/detail?id=222982#makechanges
     if (r) {
-        function toJSON(k, d) {
+        var toJSON = function (k, d) {
             d = r(k, d);
             if (typeof d === 'object') Object.keys(d).forEach(function (k) {
                 d[k] = toJSON(k,d[k]);
@@ -218,7 +227,7 @@ PeerPouch.Presence = function(hub, opts, cb) {
             
             var rtc = peerInfo.connection = new RTCPeerConnection(cfg, con);
             
-            function setupChannel(evt) {
+            var setupChannel = function (evt) {
                 if (evt) console.log(self.identity, "received data channel", evt.channel.readyState);
                 // NOTE: unreliable channel is not our preference, but that's all current FF/Chrome have
                 peerInfo.channel = (evt) ? evt.channel : rtc.createDataChannel('peerpouch-dev', {reliable:false});
