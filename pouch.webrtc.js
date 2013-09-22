@@ -203,8 +203,7 @@ PeerConnectionHandler.prototype.sendMessage = function (data) {
 PeerConnectionHandler.prototype._setupChannel = function (evt) {
     var handler = this, rtc = this._rtc;
     if (evt) console.log(this.LOG_SELF, "received data channel", evt.channel.readyState);
-    // NOTE: unreliable channel is not our preference, but that's all current FF/Chrome have
-    this._channel = (evt) ? evt.channel : rtc.createDataChannel('peerpouch-dev', {reliable:false});
+    this._channel = (evt) ? evt.channel : rtc.createDataChannel('peerpouch-dev');
     this._channel.onopen = function (evt) {
         console.log(handler.LOG_SELF, "DATA CHANNEL IS OPEN");
         if (handler.onconnection) handler.onconnection(handler._channel);        // BOOM!
