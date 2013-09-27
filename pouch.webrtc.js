@@ -121,8 +121,9 @@ var RTCPeerConnection = window.mozRTCPeerConnection || window.RTCPeerConnection 
     RTCIceCandidate = window.mozRTCIceCandidate || window.RTCIceCandidate || window.webkitRTCIceCandidate;
 
 function PeerConnectionHandler(opts) {
+    opts.reliable = false;
     var cfg = {"iceServers":[{"url":"stun:23.21.150.121"}]},
-        con = { 'optional': [{'DtlsSrtpKeyAgreement': true}, {'RtpDataChannels': true }] };
+        con = (opts.reliable) ? {} : { 'optional': [{'RtpDataChannels': true }] };
 
     this._rtc = new RTCPeerConnection(cfg, con);
     
@@ -174,7 +175,7 @@ PeerConnectionHandler.prototype.receiveSignal = function (data) {
             handler._sendSignal(answerDesc);
         }, function (e) { console.warn(handler.LOG_SELF, "couldn't create answer", e); });
     }, function (e) { console.warn(handler.LOG_SELF, "couldn't set remote description", e) });
-    else if (data.candidate) rtc.addIceCandidate(new RTCIceCandidate(data.candidate));
+    else if (data.candidate) try { rtc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch (e) { console.error("Couldn't add candidate", e); }
 };
 
 PeerConnectionHandler.prototype.sendMessage = function (data) {
