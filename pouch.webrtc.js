@@ -3,23 +3,6 @@
 
 "use strict";
 
-
-/*
-    Design questions:
-    - method of sharing databases
-    - method of connecting to database
-    - peer URL includes hub? "rtc://hub/peer"
-    - expose shares via presence or on connect?
-    - presence for peers or presence for databases?
-    - role of hub apart from signalling, i.e. presence
-    - handling of remote procedure stuff
-    - handling of security/permissions/validation
-    
-    Options:
-    - expose presence/connections controller to user (current code, ±)
-    - hide all connections setup, expose only via adapter (for connecting) and plugin (for sharing)
-*/
-
 // a couple additional errors we use
 Pouch.Errors.NOT_IMPLEMENTED = {status:501, error:'not_implemented', reason:"Unable to fulfill the request"};       // [really for METHODs only?]
 Pouch.Errors.FORBIDDEN = {status:403, error:'forbidden', reason:"The request was refused"};
