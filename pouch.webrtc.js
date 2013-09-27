@@ -121,7 +121,7 @@ var RTCPeerConnection = window.mozRTCPeerConnection || window.RTCPeerConnection 
     RTCIceCandidate = window.mozRTCIceCandidate || window.RTCIceCandidate || window.webkitRTCIceCandidate;
 
 function PeerConnectionHandler(opts) {
-    opts.reliable = false;
+    opts.reliable = true;
     var cfg = {"iceServers":[{"url":"stun:23.21.150.121"}]},
         con = (opts.reliable) ? {} : { 'optional': [{'RtpDataChannels': true }] };
 
