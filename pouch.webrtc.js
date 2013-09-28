@@ -27,13 +27,15 @@ var PeerPouch = function(opts, callback) {
     var api = {};
     
     handler.onconnection = function () {
-        if (callback) callback(null, api);
-        handler.sendMessage("SYN");
-    };
-    handler.onreceivemessage = function receiveMessage(evt) {
-        // TODO: RPC stuff!
-        console.log("Telegram, noble peer", evt.data);
-        if (evt.data.length < 1000) handler.sendMessage("YAK "+evt.data);
+        var rpc = new RPCHandler(handler._tube());
+        rpc.onbootstrap = function (_remote) {      // share will bootstrap
+            //api._remote = _remote;
+            if (callback) callback(null, api);
+            
+            _remote.echo("Hello, World!", function (msg) {
+                console.log("ECHO", msg);
+            });
+        };
     };
     
     // Use the peer's ID (prefixed?)
@@ -200,7 +202,70 @@ PeerConnectionHandler.prototype._setupChannel = function (evt) {
         rtc.onnegotiationneeded();     // FF doesn't trigger this for us like Chrome does
     }, 0);
     window.dbgChannel = this._channel;
+};
+
+PeerConnectionHandler.prototype._tube = function () {      // TODO: refactor PeerConnectionHandler to simply be the "tube" itself
+    var tube = {},
+        handler = this;
+    tube.onmessage = null;
+    tube.send = function (data) {
+        handler.sendMessage(data);
+    };
+    handler.onreceivemessage = function (evt) {
+        if (tube.onmessage) tube.onmessage(evt);
+    };
+    return tube;
+};
+
+function RPCHandler(tube) {
+    this.onbootstrap = null;        // caller MAY provide this
+    
+    this._exposed_fns = Object.create(null);     // TODO: figure out a practical cleanup strategy
+    this.serialize = function (obj) {
+        return JSON.stringify(obj, function (k,v) {
+            if (typeof v === 'function') {
+                var id = Math.random().toFixed(20).slice(2);
+                this._exposed_fns[id] = v;
+                return {__remote_fn:id};
+            } return v;
+        }.bind(this));
+    };
+    this.deserialize = function (data) {
+        return JSON.parse(data, function (k,v) {
+            if (v.__remote_fn) return function () {
+                this._callRemote(v.__remote_fn, arguments);
+            }.bind(this); else return v;
+        }.bind(this));
+    };
+    
+    this._callRemote = function (fn, args) {
+        tube.send(this.serialize({
+            fn: fn,
+            args: Array.prototype.slice.call(args)
+        }));
+    };
+    
+    this._exposed_fns['__BOOTSTRAP__'] = function () {
+        if (this.onbootstrap) this.onbootstrap.apply(this, arguments);
+    }.bind(this);
+    
+    tube.onmessage = function (evt) {
+        // TODO: figure out how to handle binary
+        var call = this.deserialize(evt.data),
+            fn = this._exposed_fns[call.fn];
+        fn.apply(null, call.args);
+        return;
+        try {
+            fn.apply(null, call.args);
+        } catch (e) {           // we do not signal exceptions remotely
+            console.warn("Local RPC invocation unexpectedly threw: "+e, e);
+        }
+    }.bind(this);
 }
+
+RPCHandler.prototype.bootstrap = function () {
+    this._callRemote('__BOOTSTRAP__', arguments);
+};
 
 
 var SharePouch = function (hub) {
@@ -280,10 +345,12 @@ var SharePouch = function (hub) {
                 handler.onhavesignal = function sendSignal(evt) {
                     hub.post({_id:'s-signal-'+Pouch.uuid(), type:_t.signal, sender:self, recipient:peer, data:evt.signal}, function (e) { if (e) throw e; });
                 };
-                handler.onreceivemessage = function receiveMessage(evt) {
-                    console.log("Telegram, sir", evt.data);
-                    if (evt.data.length < 1000) handler.sendMessage("ACK "+evt.data);
-                    // TODO: *alllllll* the RPC stuff ;-)
+                handler.onconnection = function () {
+                    var rpc = new RPCHandler(handler._tube());
+                    rpc.bootstrap({
+                        // TODO: send (hardened) API
+                        echo: function (msg, cb) { cb(msg); }
+                    });
                 };
             }
             handler.receiveSignal(signal.data);
