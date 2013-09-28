@@ -141,9 +141,9 @@ function PeerConnectionHandler(opts) {
     if (opts.initiate) this._setupChannel();
     else rtc.ondatachannel = this._setupChannel.bind(this);
     rtc.onnegotiationneeded = function (evt) {
-        console.log(handler.LOG_SELF, "saw negotiation trigger and will create an offer");
+        if (handler.DEBUG) console.log(handler.LOG_SELF, "saw negotiation trigger and will create an offer");
         rtc.createOffer(function (offerDesc) {
-            console.log(handler.LOG_SELF, "created offer, sending to", handler.LOG_PEER);
+            if (handler.DEBUG) console.log(handler.LOG_SELF, "created offer, sending to", handler.LOG_PEER);
             rtc.setLocalDescription(offerDesc);
             handler._sendSignal(offerDesc);
         }, function (e) { console.warn(handler.LOG_SELF, "failed to create offer", e); });
@@ -153,10 +153,10 @@ function PeerConnectionHandler(opts) {
     };
     // debugging
     rtc.onicechange = function (evt) {
-        console.log(handler.LOG_SELF, "ICE change", rtc.iceGatheringState, rtc.iceConnectionState);
+        if (handler.DEBUG) console.log(handler.LOG_SELF, "ICE change", rtc.iceGatheringState, rtc.iceConnectionState);
     };
     rtc.onstatechange = function (evt) {
-        console.log(handler.LOG_SELF, "State change", rtc.signalingState, rtc.readyState)
+        if (handler.DEBUG) console.log(handler.LOG_SELF, "State change", rtc.signalingState, rtc.readyState)
     };
 }
 
@@ -167,12 +167,12 @@ PeerConnectionHandler.prototype._sendSignal = function (data) {
 
 PeerConnectionHandler.prototype.receiveSignal = function (data) {
     var handler = this, rtc = this._rtc;
-    console.log(this.LOG_SELF, "got data", data, "from", this.LOG_PEER);
+    if (handler.DEBUG) console.log(this.LOG_SELF, "got data", data, "from", this.LOG_PEER);
     if (data.sdp) rtc.setRemoteDescription(new RTCSessionDescription(data), function () {
         var needsAnswer = (rtc.remoteDescription.type == 'offer');
-        console.log(handler.LOG_SELF, "set offer, now creating answer:", needsAnswer);
+        if (handler.DEBUG) console.log(handler.LOG_SELF, "set offer, now creating answer:", needsAnswer);
         if (needsAnswer) rtc.createAnswer(function (answerDesc) {
-            console.log(handler.LOG_SELF, "got anwer, sending back to", handler.LOG_PEER);
+            if (handler.DEBUG) console.log(handler.LOG_SELF, "got anwer, sending back to", handler.LOG_PEER);
             rtc.setLocalDescription(answerDesc);
             handler._sendSignal(answerDesc);
         }, function (e) { console.warn(handler.LOG_SELF, "couldn't create answer", e); });
@@ -182,20 +182,19 @@ PeerConnectionHandler.prototype.receiveSignal = function (data) {
 
 PeerConnectionHandler.prototype.sendMessage = function (data) {
     if (!this._channel || this._channel.readyState !== 'open') throw Error("Connection exists, but data channel is not open.");
-    console.log("Attempting message send of length", data.length);
     this._channel.send(data);
 };
 
 PeerConnectionHandler.prototype._setupChannel = function (evt) {
     var handler = this, rtc = this._rtc;
-    if (evt) console.log(this.LOG_SELF, "received data channel", evt.channel.readyState);
+    if (evt) if (handler.DEBUG) console.log(this.LOG_SELF, "received data channel", evt.channel.readyState);
     this._channel = (evt) ? evt.channel : rtc.createDataChannel('peerpouch-dev');
     this._channel.onopen = function (evt) {
-        console.log(handler.LOG_SELF, "DATA CHANNEL IS OPEN");
+        /*if (handler.DEBUG)*/ console.log(handler.LOG_SELF, "DATA CHANNEL IS OPEN");
         if (handler.onconnection) handler.onconnection(handler._channel);        // BOOM!
     };
     this._channel.onmessage = function (evt) {
-        console.log(handler.LOG_SELF, "received message!", evt);
+        if (handler.DEBUG) console.log(handler.LOG_SELF, "received message!", evt);
         if (handler.onreceivemessage) handler.onreceivemessage({target:handler, data:evt.data});
     };
     if (window.mozRTCPeerConnection) setTimeout(function () {
