@@ -85,7 +85,7 @@ PeerPouch._wrappedAPI = function (db) {
     // most methods can just be proxied directly
     methods.forEach(function (k) {
         rpcAPI[k] = db[k];
-        rpcAPI[k]._keep_exposed = true;
+        if (rpcAPI[k]) rpcAPI[k]._keep_exposed = true;
     });
     
     // one override, to pass the `.cancel()` helper via callback to the synchronous override on the other side
