@@ -235,8 +235,8 @@ function RPCHandler(tube) {
                 this._exposed_fns[id] = v;
                 return {__remote_fn:id};
             } else if (_isBlob(v)) {
-                var n = messages.indexOf(v);
-                if (!~n) n = messages.push(v) - 1;
+                var n = messages.indexOf(v) + 1;
+                if (!n) n = messages.push(v);
                 return {__blob:n};
             } else return v;
         }.bind(this)));
@@ -251,7 +251,7 @@ function RPCHandler(tube) {
                     this._callRemote(v.__remote_fn, arguments);
                 }.bind(this);
                 else if (v && v.__blob) {
-                    var b = blobsForNextCall[v.__blob];
+                    var b = blobsForNextCall[v.__blob-1];
                     if (!_isBlob(b)) b = new Blob(b);       // may actually be an ArrayBuffer
                     return b;
                 }
