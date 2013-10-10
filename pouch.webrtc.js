@@ -221,7 +221,7 @@ PeerConnectionHandler.prototype._tube = function () {      // TODO: refactor Pee
 function RPCHandler(tube) {
     this.onbootstrap = null;        // caller MAY provide this
     
-    this._exposed_fns = Object.create(null);     // TODO: figure out a practical cleanup strategy
+    this._exposed_fns = Object.create(null);
     this.serialize = function (obj) {
         return JSON.stringify(obj, function (k,v) {
             if (typeof v === 'function') {
