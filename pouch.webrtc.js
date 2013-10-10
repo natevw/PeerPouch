@@ -195,7 +195,7 @@ PeerConnectionHandler.prototype._setupChannel = function (evt) {
     var handler = this, rtc = this._rtc;
     if (evt) if (handler.DEBUG) console.log(this.LOG_SELF, "received data channel", evt.channel.readyState);
     this._channel = (evt) ? evt.channel : rtc.createDataChannel('peerpouch-dev');
-    //this._channel.binaryType = 'arraybuffer';       // looks like Chrome does not support Blob atm?
+    // NOTE: in Chrome (M32) `this._channel.binaryType === 'arraybuffer'` instead of blob
     this._channel.onopen = function (evt) {
         /*if (handler.DEBUG)*/ console.log(handler.LOG_SELF, "DATA CHANNEL IS OPEN", handler._channel);
         if (handler.onconnection) handler.onconnection(handler._channel);        // BOOM!
@@ -252,7 +252,7 @@ function RPCHandler(tube) {
                 }.bind(this);
                 else if (v && v.__blob) {
                     var b = blobsForNextCall[v.__blob-1];
-                    if (!_isBlob(b)) b = new Blob(b);       // may actually be an ArrayBuffer
+                    if (!_isBlob(b)) b = new Blob([b]);       // `b` may actually be an ArrayBuffer
                     return b;
                 }
                 else return v;
@@ -270,7 +270,24 @@ function RPCHandler(tube) {
             fn: fn,
             args: Array.prototype.slice.call(args)
         });
-        messages.forEach(function (msg) { tube.send(msg); });
+        if (window.mozRTCPeerConnection) messages.forEach(function (msg) { tube.send(msg); });
+        else processNext();
+        // WORKAROUND: Chrome (as of M32) cannot send a Blob, only an ArrayBuffer. So we send each once converted…
+        function processNext() {
+            var msg = messages.shift();
+            if (!msg) return;
+            if (_isBlob(msg)) {
+                var r = new FileReader();
+                r.readAsArrayBuffer(msg);
+                r.onload = function () {
+                    tube.send(r.result);
+                    processNext();
+                }
+            } else {
+                tube.send(msg);
+                processNext();
+            }
+        }
     };
     
     this._exposed_fns['__BOOTSTRAP__'] = function () {
