@@ -191,8 +191,9 @@ PeerConnectionHandler.prototype._setupChannel = function (evt) {
     var handler = this, rtc = this._rtc;
     if (evt) if (handler.DEBUG) console.log(this.LOG_SELF, "received data channel", evt.channel.readyState);
     this._channel = (evt) ? evt.channel : rtc.createDataChannel('peerpouch-dev');
+    //this._channel.binaryType = 'arraybuffer';       // looks like Chrome does not support Blob atm?
     this._channel.onopen = function (evt) {
-        /*if (handler.DEBUG)*/ console.log(handler.LOG_SELF, "DATA CHANNEL IS OPEN");
+        /*if (handler.DEBUG)*/ console.log(handler.LOG_SELF, "DATA CHANNEL IS OPEN", handler._channel);
         if (handler.onconnection) handler.onconnection(handler._channel);        // BOOM!
     };
     this._channel.onmessage = function (evt) {
@@ -223,37 +224,61 @@ function RPCHandler(tube) {
     
     this._exposed_fns = Object.create(null);
     this.serialize = function (obj) {
-        return JSON.stringify(obj, function (k,v) {
+        var messages = [];
+        messages.push(JSON.stringify(obj, function (k,v) {
             if (typeof v === 'function') {
                 var id = Math.random().toFixed(20).slice(2);
                 this._exposed_fns[id] = v;
                 return {__remote_fn:id};
-            } return v;
-        }.bind(this));
-    };
-    this.deserialize = function (data) {
-        return JSON.parse(data, function (k,v) {
-            if (v && v.__remote_fn) return function () {
-                this._callRemote(v.__remote_fn, arguments);
-            }.bind(this); else return v;
-        }.bind(this));
+            } else if (_isBlob(v)) {
+                var n = messages.indexOf(v);
+                if (!~n) n = messages.push(v) - 1;
+                return {__blob:n};
+            } else return v;
+        }.bind(this)));
+        return messages;
     };
     
+    var blobsForNextCall = [];                  // each binary object is sent before the function call message
+    this.deserialize = function (data) {
+        if (typeof data === 'string') {
+            return JSON.parse(data, function (k,v) {
+                if (v && v.__remote_fn) return function () {
+                    this._callRemote(v.__remote_fn, arguments);
+                }.bind(this);
+                else if (v && v.__blob) {
+                    var b = blobsForNextCall[v.__blob];
+                    if (!_isBlob(b)) b = new Blob(b);       // may actually be an ArrayBuffer
+                    return b;
+                }
+                else return v;
+            }.bind(this));
+            blobsForNextCall.length = 0;
+        } else blobsForNextCall.push(data);
+    };
+    
+    function _isBlob(obj) {
+        return (Object.prototype.toString.call(obj) === '[object Blob]'); 
+    }
+    
     this._callRemote = function (fn, args) {
-        tube.send(this.serialize({
+        var messages = this.serialize({
             fn: fn,
             args: Array.prototype.slice.call(args)
-        }));
+        });
+        messages.forEach(function (msg) { tube.send(msg); });
     };
     
     this._exposed_fns['__BOOTSTRAP__'] = function () {
         if (this.onbootstrap) this.onbootstrap.apply(this, arguments);
     }.bind(this);
     
+    
     tube.onmessage = function (evt) {
-        // TODO: figure out how to handle binary
-        var call = this.deserialize(evt.data),
-            fn = this._exposed_fns[call.fn];
+        var call = this.deserialize(evt.data);
+        if (!call) return;      // 
+        
+        var fn = this._exposed_fns[call.fn];
         if (!fn) {
             console.warn("RPC call to unknown local function", call);
             return;
