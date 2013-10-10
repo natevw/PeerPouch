@@ -35,6 +35,7 @@ var PeerPouch = function(opts, callback) {
             
             // one override to provide a synchronous `.cancel()` helper locally
             api._changes = function (opts) {
+                if (opts.onChange) opts.onChange._keep_exposed = true;      // otherwise the RPC mechanism tosses after one use
                 var cancelRemotely = null,
                     cancelledLocally = false; 
                 rpcAPI._changes(opts, function (rpcCancel) {
@@ -85,7 +86,6 @@ PeerPouch._wrappedAPI = function (db) {
     
     // one override, to pass the `.cancel()` helper via callback to the synchronous override on the other side
     rpcAPI._changes = function (opts, rpcCB) {
-        // TODO: also mark opts.onChange against one-shot RPC cleanup
         var retval = db._changes(opts);
         rpcCB(retval.cancel);
     }
@@ -253,6 +253,14 @@ function RPCHandler(tube) {
         // TODO: figure out how to handle binary
         var call = this.deserialize(evt.data),
             fn = this._exposed_fns[call.fn];
+        if (!fn) {
+            console.warn("RPC call to unknown local function", call);
+            return;
+        }
+        
+        // leak only callbacks which are marked for keeping (most are one-shot)
+        if (!fn._keep_exposed) delete this._exposed_fns[call.fn];
+        
         try {
             fn.apply(null, call.args);
         } catch (e) {           // we do not signal exceptions remotely
