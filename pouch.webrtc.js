@@ -45,6 +45,7 @@ var PeerPouch = function(opts, callback) {
                 return {cancel:function () {
                     if (cancelRemotely) cancelRemotely();
                     else cancelledLocally = true;
+                    if (opts.onChange) delete opts.onChange._keep_exposed;  // allow for slight chance of cleanup [if called again]
                 }};
             };
             
