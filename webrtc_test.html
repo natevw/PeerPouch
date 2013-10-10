@@ -50,6 +50,7 @@ queue()
     });
     
     // and open whichever other database gets shared next
+    console.log("Waiting for a new share to appear.");
     var listener = hub.getSharedDatabases({onChange:function (d) {
         listener.cancel();
         console.log("Trying to connect to", d.dbname);

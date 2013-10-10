@@ -18,12 +18,8 @@ var PeerPouch = function(opts, callback) {
     var _init = PeerPouch._shareInitializersByName[opts.name];
     if (!_init) throw Error("Unknown PeerPouch share dbname");      // TODO: use callback instead?
     
-    var handler = _init(function (e,d) {
-        console.log("_share.initiateHandler result", e,d);
-        TODO(callback);
-    });
-    
-    var api = {};       // initialized later, but Pouch makes us return this before it's ready
+    var handler = _init(),
+        api = {};       // initialized later, but Pouch makes us return this before it's ready
     
     handler.onconnection = function () {
         var rpc = new RPCHandler(handler._tube());
@@ -57,11 +53,6 @@ var PeerPouch = function(opts, callback) {
             
             // now our api object is *actually* ready for use
             if (callback) callback(null, api);
-            
-            // TODO: test code, remove at some point
-            d.echo("Hello, World!", function (msg) {
-                console.log("ECHO", msg);
-            });
         };
     };
     
@@ -197,7 +188,7 @@ PeerConnectionHandler.prototype._setupChannel = function (evt) {
     this._channel = (evt) ? evt.channel : rtc.createDataChannel('peerpouch-dev');
     // NOTE: in Chrome (M32) `this._channel.binaryType === 'arraybuffer'` instead of blob
     this._channel.onopen = function (evt) {
-        /*if (handler.DEBUG)*/ console.log(handler.LOG_SELF, "DATA CHANNEL IS OPEN", handler._channel);
+        if (handler.DEBUG) console.log(handler.LOG_SELF, "DATA CHANNEL IS OPEN", handler._channel);
         if (handler.onconnection) handler.onconnection(handler._channel);        // BOOM!
     };
     this._channel.onmessage = function (evt) {
@@ -400,7 +391,6 @@ var SharePouch = function (hub) {
                 handler.onconnection = function () {
                     var rpc = new RPCHandler(handler._tube());
                     rpc.bootstrap({
-                        echo: function (msg, cb) { cb(msg); },
                         api: PeerPouch._wrappedAPI(db)
                     });
                 };
