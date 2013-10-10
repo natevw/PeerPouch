@@ -30,37 +30,42 @@ var HUB_URL = "http://peerpouch-test.ipcalf.com",
 queue()
     .defer(PouchDB, HUB_URL)
     .defer(PouchDB, SHARE_URL)
-.await(function (e, hub, share) {
+.await(function (e, hub, local) {
     if (e) throw e;
+    window.dbgLocal = local;    // expose for console inspection
     
     setInterval(function () {
-        share.put({_id:'at_'+Date.now()});
+        var id = location.hash.slice(1)+'_at_'+Date.now();
+        local.put({_id:id});
     }, 15e3);
     
+    local.changes({since:'latest', continuous:true, onChange:function (chg) {
+        var src = chg.id.split('_at_')[0];
+        if (src !== location.hash.slice(1)) console.log("Got non-local change", chg.id);
+    }});
+    
     // share our local database
-    hub.shareDatabase(share, function (e,d) {
-        console.log("hub.shareDatabase result", e,d);
+    hub.shareDatabase(local, function (e,d) {
+        if (e) throw e;
     });
     
     // and open whichever other database gets shared next
     var listener = hub.getSharedDatabases({onChange:function (d) {
-        console.log("hub.getSharedDatabases change", d);
         listener.cancel();
-        
-        console.log("Trying to connect to", d._id, d.dbname);
+        console.log("Trying to connect to", d.dbname);
         PouchDB(d.dbname, function (e,remote) {
             if (e) throw e;
+            window.dbgRemote = remote;    // expose for console inspection
+            
             console.log("Opened remote", remote);
             
-            remote.info(function (e,d) {
-                if (e) throw e;
-                remote.allDocs(function (e,d) {
-                    console.log("ALL DOCS", e,d);
-                });
-                remote.changes({since:d.update_seq, continuous:true, onChange:function (change) {
-                    console.log("CHANGE", change);
-                }});
-            });
+            // NOTE: the replicator doesn't seem to call our onChange loggers much/ever
+            PouchDB.replicate(remote, local, {continuous:true, onChange:function (change) {
+                console.log("RX CHANGE FROM REMOTE", change);
+            }});
+            PouchDB.replicate(local, remote, {continuous:true, onChange:function (change) {
+                console.log("TX CHANGE TO REMOTE", change);
+            }});
         });
     }}, function (){/*ignore existing*/});
 });

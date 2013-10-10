@@ -23,22 +23,77 @@ var PeerPouch = function(opts, callback) {
         TODO(callback);
     });
     
-    // Our concrete adapter implementations and any additional public api
-    var api = {};
+    var api = {};       // initialized later, but Pouch makes us return this before it's ready
     
     handler.onconnection = function () {
         var rpc = new RPCHandler(handler._tube());
-        rpc.onbootstrap = function (_remote) {      // share will bootstrap
-            Object.keys(_remote.api).forEach(function (k) { api[k]= _remote.api[k]; });
+        rpc.onbootstrap = function (d) {      // share will bootstrap
+            var rpcAPI = d.api;
+            
+            // simply hook up each [proxied] remote method as our own local implementation
+            Object.keys(rpcAPI).forEach(function (k) { api[k]= rpcAPI[k]; });
+            
+            // one override to provide a synchronous `.cancel()` helper locally
+            api._changes = function (opts) {
+                var cancelRemotely = null,
+                    cancelledLocally = false; 
+                rpcAPI._changes(opts, function (rpcCancel) {
+                    if (cancelledLocally) rpcCancel();
+                    else cancelRemotely = rpcCancel;
+                });
+                return {cancel:function () {
+                    if (cancelRemotely) cancelRemotely();
+                    else cancelledLocally = true;
+                }};
+            };
+            
+            api._id = function () {
+                // TODO: does this need to be "mangled" to distinguish it from the real copy?
+                //       [it seems unnecessary: a replication with "api" is a replication with "rpcAPI"]
+                return rpcAPI._id;
+            };
+            
+            // now our api object is *actually* ready for use
             if (callback) callback(null, api);
             
-            _remote.echo("Hello, World!", function (msg) {
+            // TODO: test code, remove at some point
+            d.echo("Hello, World!", function (msg) {
                 console.log("ECHO", msg);
             });
         };
     };
     
     return api;
+};
+
+PeerPouch._wrappedAPI = function (db) {
+    /*
+        This object will be sent over to the remote peer. So, all methods on it must be:
+        - async-only (all "communication" must be via callback, not exceptions or return values)
+        - secure (peer could provide untoward arguments)
+    */
+    var rpcAPI = {};
+    
+    
+    /*
+        This lists the core "customApi" methods that are expected by pouch.adapter.js
+    */
+    var methods = ['bulkDocs', '_getRevisionTree', '_doCompaction', '_get', '_getAttachment', '_allDocs', '_changes', '_close', '_info', '_id'];
+    
+    // most methods can just be proxied directly
+    methods.forEach(function (k) { rpcAPI[k] = db[k]; });
+    
+    // one override, to pass the `.cancel()` helper via callback to the synchronous override on the other side
+    rpcAPI._changes = function (opts, rpcCB) {
+        // TODO: also mark opts.onChange against one-shot RPC cleanup
+        var retval = db._changes(opts);
+        rpcCB(retval.cancel);
+    }
+    
+    // just send the local result
+    rpcAPI._id = db.id();
+    
+    return rpcAPI;
 };
 
 // Don't bother letting peers nuke each others' databases
@@ -290,9 +345,8 @@ var SharePouch = function (hub) {
                 handler.onconnection = function () {
                     var rpc = new RPCHandler(handler._tube());
                     rpc.bootstrap({
-                        // TODO: send (hardened) API
                         echo: function (msg, cb) { cb(msg); },
-                        api: db
+                        api: PeerPouch._wrappedAPI(db)
                     });
                 };
             }
