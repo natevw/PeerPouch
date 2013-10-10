@@ -29,7 +29,7 @@ var PeerPouch = function(opts, callback) {
     handler.onconnection = function () {
         var rpc = new RPCHandler(handler._tube());
         rpc.onbootstrap = function (_remote) {      // share will bootstrap
-            //api._remote = _remote;
+            Object.keys(_remote.api).forEach(function (k) { api[k]= _remote.api[k]; });
             if (callback) callback(null, api);
             
             _remote.echo("Hello, World!", function (msg) {
@@ -37,60 +37,6 @@ var PeerPouch = function(opts, callback) {
             });
         };
     };
-    
-    // Use the peer's ID (prefixed?)
-    api._id = function() {
-        // TODO: implement for realsies
-        return Math.random().toFixed(16).slice(2);
-    };
-    
-    // Let our users send arbitrary chatter since we have a connection anyway
-    // (We'll likely use this internally for our own communications too)
-    api.message = function(options, callback) {
-        TODO(callback);         // we'll also want a way to listen for messages back
-    };
-    
-    
-    // Concrete implementations of abstract adapter methods
-    
-    // TODO: update this with latest (e.g. _getRevisionTree, _removeDocRevisions)
-    
-    // these should be implemented as very generic simple RPC-type stuff
-    // for now don't allow *any* remote code execution — eventually optimize map/reduce to happen in WebWorker but, until then,
-    // instead use dNode-style (IIRC) trick of serializing functions as an ID and then executing back locally when called on remote
-    // (how to handle synchronous map/reduce functions?)
-    
-    api._info = function(callback) {
-        TODO(callback);
-    };
-    api._get = function(id, opts, callback) {
-        TODO(callback);
-    };
-    api._getAttachment = function (id, opts, callback) {
-        TODO(callback);
-    };
-    api._allDocs = function(opts, callback) {
-        TODO(callback);
-    };
-    api._bulkDocs = function(req, opts, callback) {
-        TODO(callback);
-    };
-    api._changes = function(opts) {
-        TODO(callback);
-    };
-    api._close = function(callback) {
-        TODO(callback);
-    };
-    api._info = function(callback) {
-        TODO(callback);
-    };
-    
-    api._id = function() {
-        // TODO: implement for realsies using the peer's ID and any other necessary info
-        return Math.random().toFixed(16).slice(2);
-    };
-    
-    // TODO: add appropriate support for plugins (query/spatial/etc.)
     
     return api;
 };
@@ -231,7 +177,7 @@ function RPCHandler(tube) {
     };
     this.deserialize = function (data) {
         return JSON.parse(data, function (k,v) {
-            if (v.__remote_fn) return function () {
+            if (v && v.__remote_fn) return function () {
                 this._callRemote(v.__remote_fn, arguments);
             }.bind(this); else return v;
         }.bind(this));
@@ -252,8 +198,6 @@ function RPCHandler(tube) {
         // TODO: figure out how to handle binary
         var call = this.deserialize(evt.data),
             fn = this._exposed_fns[call.fn];
-        fn.apply(null, call.args);
-        return;
         try {
             fn.apply(null, call.args);
         } catch (e) {           // we do not signal exceptions remotely
@@ -265,7 +209,6 @@ function RPCHandler(tube) {
 RPCHandler.prototype.bootstrap = function () {
     this._callRemote('__BOOTSTRAP__', arguments);
 };
-
 
 var SharePouch = function (hub) {
     // NOTE: this plugin's methods are intended for use only on a **hub** database
@@ -348,7 +291,8 @@ var SharePouch = function (hub) {
                     var rpc = new RPCHandler(handler._tube());
                     rpc.bootstrap({
                         // TODO: send (hardened) API
-                        echo: function (msg, cb) { cb(msg); }
+                        echo: function (msg, cb) { cb(msg); },
+                        api: db
                     });
                 };
             }

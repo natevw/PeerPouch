@@ -33,6 +33,10 @@ queue()
 .await(function (e, hub, share) {
     if (e) throw e;
     
+    setInterval(function () {
+        share.put({_id:'at_'+Date.now()});
+    }, 15e3);
+    
     // share our local database
     hub.shareDatabase(share, function (e,d) {
         console.log("hub.shareDatabase result", e,d);
@@ -42,10 +46,21 @@ queue()
     var listener = hub.getSharedDatabases({onChange:function (d) {
         console.log("hub.getSharedDatabases change", d);
         listener.cancel();
-console.log("Trying to connect to", d._id, d.dbname);
+        
+        console.log("Trying to connect to", d._id, d.dbname);
         PouchDB(d.dbname, function (e,remote) {
             if (e) throw e;
             console.log("Opened remote", remote);
+            
+            remote.info(function (e,d) {
+                if (e) throw e;
+                remote.allDocs(function (e,d) {
+                    console.log("ALL DOCS", e,d);
+                });
+                remote.changes({since:d.update_seq, continuous:true, onChange:function (change) {
+                    console.log("CHANGE", change);
+                }});
+            });
         });
     }}, function (){/*ignore existing*/});
 });
