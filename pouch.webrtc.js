@@ -83,13 +83,17 @@ PeerPouch._wrappedAPI = function (db) {
     var methods = ['bulkDocs', '_getRevisionTree', '_doCompaction', '_get', '_getAttachment', '_allDocs', '_changes', '_close', '_info', '_id'];
     
     // most methods can just be proxied directly
-    methods.forEach(function (k) { rpcAPI[k] = db[k]; });
+    methods.forEach(function (k) {
+        rpcAPI[k] = db[k];
+        rpcAPI[k]._keep_exposed = true;
+    });
     
     // one override, to pass the `.cancel()` helper via callback to the synchronous override on the other side
     rpcAPI._changes = function (opts, rpcCB) {
         var retval = db._changes(opts);
         rpcCB(retval.cancel);
     }
+    rpcAPI._changes._keep_exposed = true;
     
     // just send the local result
     rpcAPI._id = db.id();
