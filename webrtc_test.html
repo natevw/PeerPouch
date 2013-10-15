@@ -24,8 +24,9 @@
 <pre>TBD: log to here / simple demo</pre>
 
 <script>
-var HUB_URL = "http://peerpouch-test.ipcalf.com",
-    SHARE_URL = "idb://peerpouch-test";
+var NAME = location.hash.slice(1) || "noname",
+    HUB_URL = "http://peerpouch-test.ipcalf.com",
+    SHARE_URL = "idb://peerpouch-test-"+NAME;
 
 queue()
     .defer(PouchDB, HUB_URL)
@@ -35,13 +36,13 @@ queue()
     window.dbgLocal = local;    // expose for console inspection
     
     setInterval(function () {
-        var id = location.hash.slice(1)+'_at_'+Date.now();
+        var id = NAME+'_at_'+Date.now();
         local.put({_id:id});
     }, 15e3);
     
     local.changes({since:'latest', continuous:true, onChange:function (chg) {
         var src = chg.id.split('_at_')[0];
-        if (src !== location.hash.slice(1)) console.log("Got non-local change", chg.id);
+        if (src !== NAME) console.log("Got non-local change", chg.id);
     }});
     
     // share our local database
@@ -60,7 +61,6 @@ queue()
             
             console.log("Opened remote", remote);
             
-            // NOTE: the replicator doesn't seem to call our onChange loggers much/ever
             PouchDB.replicate(remote, local, {continuous:true, onChange:function (change) {
                 console.log("RX CHANGE FROM REMOTE", change);
             }});
