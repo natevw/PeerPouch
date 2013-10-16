@@ -406,6 +406,7 @@ var SharePouch = function (hub) {
                 };
             }
             handler.receiveSignal(signal.data);
+            hub.post({_id:signal._id,_rev:signal._rev,_deleted:true}, function (e) { if (e) console.warn("Couldn't clean up signal", e); });
         });
         sharesByRemoteId[share._id] = sharesByLocalId[db.id()] = share;
     }
@@ -427,7 +428,9 @@ var SharePouch = function (hub) {
                 hub.post({_id:'p-signal-'+Pouch.uuid(), type:_t.signal, sender:client, recipient:share, data:evt.signal}, function (e) { if (e) throw e; });
             };
             addWatcher(_t.signal, function receiveSignal(signal) {
-                if (signal.recipient === client && signal.sender === share) handler.receiveSignal(signal.data);
+                if (signal.recipient !== client || signal.sender !== share) return;
+                handler.receiveSignal(signal.data);
+                hub.post({_id:signal._id,_rev:signal._rev,_deleted:true}, function (e) { if (e) console.warn("Couldn't clean up signal", e); });
             });
             return handler;     /* for .onreceivemessage and .sendMessage use */
         };
