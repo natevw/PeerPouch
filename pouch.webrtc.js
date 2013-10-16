@@ -225,6 +225,14 @@ function RPCHandler(tube) {
                 var id = Math.random().toFixed(20).slice(2);
                 this._exposed_fns[id] = v;
                 return {__remote_fn:id};
+            } else if (Object.prototype.toString.call(v) === '[object IDBTransaction]') {
+                // HACK: pouch.idb.js likes to bounce a ctx object around but if we null it out it recreates
+                // c.f. https://github.com/daleharvey/pouchdb/commit/e7f66a02509bd2a9bd12369c87e6238fadc13232
+                return;
+                
+                // TODO: the WebSQL adapter also does this but does NOT create a new transaction if it's missing :-(
+                // https://github.com/daleharvey/pouchdb/blob/80514c7d655453213f9ca7113f327424969536c4/src/adapters/pouch.websql.js#L646
+                // so we'll have to either get that fixed upstream or add remote object references (but how to garbage collect? what if local uses?!)
             } else if (_isBlob(v)) {
                 var n = messages.indexOf(v) + 1;
                 if (!n) n = messages.push(v);
@@ -257,6 +265,7 @@ function RPCHandler(tube) {
     }
     
     this._callRemote = function (fn, args) {
+//console.log("Serializing RPC", fn, args);
         var messages = this.serialize({
             fn: fn,
             args: Array.prototype.slice.call(args)
@@ -300,6 +309,7 @@ function RPCHandler(tube) {
         if (!fn._keep_exposed) delete this._exposed_fns[call.fn];
         
         try {
+//console.log("Calling RPC", fn, call.args);
             fn.apply(null, call.args);
         } catch (e) {           // we do not signal exceptions remotely
             console.warn("Local RPC invocation unexpectedly threw: "+e, e);
