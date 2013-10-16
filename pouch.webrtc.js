@@ -435,6 +435,10 @@ var SharePouch = function (hub) {
         return doc;
     }
     
+    function _isLocal(doc) {
+        return (doc._id in sharesByRemoteId);
+    }
+    
     function getShares(opts, cb) {
         if (typeof opts === 'function') {
             cb = opts;
@@ -444,10 +448,12 @@ var SharePouch = function (hub) {
         //hub.query(_t.ddoc_name+'/shares', {include_docs:true}, function (e, d) {
         hub.allDocs({include_docs:true}, function (e,d) {
             if (e) cb(e);
-            else cb(null, d.rows.filter(function (r) { return !(r.doc._id in sharesByRemoteId); }).map(function (r) { return _localizeShare(r.doc); }));
+            else cb(null, d.rows.filter(function (r) {
+                return (r.doc.type === _t.share && !_isLocal(r.doc));
+            }).map(function (r) { return _localizeShare(r.doc); }));
         });
         if (opts.onChange) {            // WARNING/TODO: listener may get changes before cb returns initial list!
-            return addWatcher(_t.share, function (doc) { if (!(doc._id in sharesByRemoteId)) opts.onChange(_localizeShare(doc)); });
+            return addWatcher(_t.share, function (doc) { if (!_isLocal(doc)) opts.onChange(_localizeShare(doc)); });
         }
     }
     
