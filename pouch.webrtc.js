@@ -399,6 +399,7 @@ var SharePouch = function (hub) {
                     hub.post({_id:'s-signal-'+Pouch.uuid(), type:_t.signal, sender:self, recipient:peer, data:evt.signal}, function (e) { if (e) throw e; });
                 };
                 handler.onconnection = function () {
+                    if (opts.onRemote) opts.onRemote.call(handler._rtc,{peer:peer});            // TODO: this is likely to change!
                     var rpc = new RPCHandler(handler._tube());
                     rpc.bootstrap({
                         api: PeerPouch._wrappedAPI(db)
