@@ -403,7 +403,15 @@ var SharePouch = function (hub) {
                     }, function (e) { if (e) throw e; });
                 };
                 handler.onconnection = function () {
-                    if (opts.onRemote) opts.onRemote.call(handler._rtc, {info:info});            // TODO: this is [still] likely to change!
+                    if (opts.onRemote) {
+                        var evt = {info:info},
+                            cancelled = false;
+                        evt.preventDefault = function () {
+                            cancelled = true;
+                        };
+                        opts.onRemote.call(handler._rtc, evt);            // TODO: this is [still] likely to change!
+                        if (cancelled) return;       // TODO: close connection
+                    }
                     var rpc = new RPCHandler(handler._tube());
                     rpc.bootstrap({
                         api: PeerPouch._wrappedAPI(db)
