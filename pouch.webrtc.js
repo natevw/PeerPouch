@@ -18,7 +18,7 @@ var PeerPouch = function(opts, callback) {
     var _init = PeerPouch._shareInitializersByName[opts.name];
     if (!_init) throw Error("Unknown PeerPouch share dbname");      // TODO: use callback instead?
     
-    var handler = _init(),
+    var handler = _init(opts),
         api = {};       // initialized later, but Pouch makes us return this before it's ready
     
     handler.onconnection = function () {
@@ -391,15 +391,19 @@ var SharePouch = function (hub) {
         share._signalWatcher = addWatcher(_t.signal, function receiveSignal(signal) {
             if (signal.recipient !== share._id) return;
             
-            var self = share._id, peer = signal.sender,
+            var self = share._id, peer = signal.sender, info = signal.info,
                 handler = peerHandlers[peer];
             if (!handler) {
                 handler = peerHandlers[peer] = new PeerConnectionHandler({initiate:false, _self:self, _peer:peer});
                 handler.onhavesignal = function sendSignal(evt) {
-                    hub.post({_id:'s-signal-'+Pouch.uuid(), type:_t.signal, sender:self, recipient:peer, data:evt.signal}, function (e) { if (e) throw e; });
+                    hub.post({
+                        _id:'s-signal-'+Pouch.uuid(), type:_t.signal,
+                        sender:self, recipient:peer,
+                        data:evt.signal, info:share.info
+                    }, function (e) { if (e) throw e; });
                 };
                 handler.onconnection = function () {
-                    if (opts.onRemote) opts.onRemote.call(handler._rtc,{peer:peer});            // TODO: this is likely to change!
+                    if (opts.onRemote) opts.onRemote.call(handler._rtc, {info:info});            // TODO: this is [still] likely to change!
                     var rpc = new RPCHandler(handler._tube());
                     rpc.bootstrap({
                         api: PeerPouch._wrappedAPI(db)
@@ -422,11 +426,15 @@ var SharePouch = function (hub) {
     function _localizeShare(doc) {
         var name = [hub.id(),doc._id].map(encodeURIComponent).join('/');
         if (doc._deleted) delete PeerPouch._shareInitializersByName[name];
-        else PeerPouch._shareInitializersByName[name] = function () {
+        else PeerPouch._shareInitializersByName[name] = function (opts) {
             var client = 'peer-'+Pouch.uuid(), share = doc._id,
                 handler = new PeerConnectionHandler({initiate:true, _self:client, _peer:share});
             handler.onhavesignal = function sendSignal(evt) {
-                hub.post({_id:'p-signal-'+Pouch.uuid(), type:_t.signal, sender:client, recipient:share, data:evt.signal}, function (e) { if (e) throw e; });
+                hub.post({
+                    _id:'p-signal-'+Pouch.uuid(), type:_t.signal,
+                    sender:client, recipient:share,
+                    data:evt.signal, info:opts.info
+                }, function (e) { if (e) throw e; });
             };
             addWatcher(_t.signal, function receiveSignal(signal) {
                 if (signal.recipient !== client || signal.sender !== share) return;
