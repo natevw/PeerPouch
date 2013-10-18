@@ -261,7 +261,8 @@ function RPCHandler(tube) {
     };
     
     function _isBlob(obj) {
-        return (Object.prototype.toString.call(obj) === '[object Blob]'); 
+        var type = Object.prototype.toString.call(obj);
+        return (type === '[object Blob]' || type === '[object File]');
     }
     
     this._callRemote = function (fn, args) {
