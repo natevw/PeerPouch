@@ -425,6 +425,9 @@ var SharePouch = function (hub) {
     }
     function unshare(db, cb) {            // TODO: call this automatically from _delete hook whenever it sees a previously shared db?
         var share = sharesByLocalId[db.id()];
+        if (!share) return cb && setTimeout(function () {
+            cb(new Error("Database is not currently shared"));
+        }, 0);
         hub.post({_id:share._id,_rev:share._rev,_deleted:true}, cb);
         share._signalWatcher.cancel();
         delete sharesByRemoteId[share._id];
