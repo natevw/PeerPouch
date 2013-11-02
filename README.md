@@ -41,8 +41,10 @@ After including PouchDB and PeerPouch on your page, start by opening the hub:
         // or connect to someone else's shared database like…
         hub.getSharedDatabases(function (e,shares) {
             PouchDB(shares[0].dbname, function (e, remote) {
-                // NOTE: actually calling methods on the remote database is not implemented yet
                 remote.allDocs(function (e,result) { console.log("Peer's documents are:", result.rows); });
+                // or set up two-way replication to a local DB!
+                PouchDB.replicate(remote, local);
+                PouchDB.replicate(local, remote);
             });
         });
     });
