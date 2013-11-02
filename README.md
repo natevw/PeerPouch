@@ -1,6 +1,6 @@
 # PeerPouch
 
-Implementing an adapter (and plugin) for PouchDB that proxies to a remote PouchDB instance over WebRTC, for particularly peer-to-peer replication!
+A plugin for PouchDB which allows a remote PouchDB instance to be used locally. It transfers data over WebRTC, for simple lower-latency remote access and even particularly peer-to-peer replication!
 
 ## API
 
