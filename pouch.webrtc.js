@@ -1,7 +1,9 @@
-/*globals Pouch: true, call: false, ajax: true */
+/*globals Pouch: true, PouchDB: true, call: false, ajax: true */
 /*globals require: false, console: false */
 
 "use strict";
+
+var Pouch = PouchDB;
 
 // a couple additional errors we use
 Pouch.Errors.NOT_IMPLEMENTED = {status:501, error:'not_implemented', reason:"Unable to fulfill the request"};       // [really for METHODs only?]
@@ -14,26 +16,28 @@ var PeerPouch = function(opts, callback) {
         // TODO: callers of this function want implementations
         if (callback) setTimeout(function () { callback(Pouch.Errors.NOT_IMPLEMENTED); }, 0);
     }
-    
+
     var _init = PeerPouch._shareInitializersByName[opts.name];
     if (!_init) throw Error("Unknown PeerPouch share dbname");      // TODO: use callback instead?
-    
+
     var handler = _init(opts),
         api = {};       // initialized later, but Pouch makes us return this before it's ready
-    
+
+    handler.DEBUG = true;
+
     handler.onconnection = function () {
         var rpc = new RPCHandler(handler._tube());
         rpc.onbootstrap = function (d) {      // share will bootstrap
             var rpcAPI = d.api;
-            
+
             // simply hook up each [proxied] remote method as our own local implementation
             Object.keys(rpcAPI).forEach(function (k) { api[k]= rpcAPI[k]; });
-            
+
             // one override to provide a synchronous `.cancel()` helper locally
             api._changes = function (opts) {
                 if (opts.onChange) opts.onChange._keep_exposed = true;      // otherwise the RPC mechanism tosses after one use
                 var cancelRemotely = null,
-                    cancelledLocally = false; 
+                    cancelledLocally = false;
                 rpcAPI._changes(opts, function (rpcCancel) {
                     if (cancelledLocally) rpcCancel();
                     else cancelRemotely = rpcCancel;
@@ -44,18 +48,18 @@ var PeerPouch = function(opts, callback) {
                     if (opts.onChange) delete opts.onChange._keep_exposed;  // allow for slight chance of cleanup [if called again]
                 }};
             };
-            
+
             api._id = function () {
                 // TODO: does this need to be "mangled" to distinguish it from the real copy?
                 //       [it seems unnecessary: a replication with "api" is a replication with "rpcAPI"]
                 return rpcAPI._id;
             };
-            
+
             // now our api object is *actually* ready for use
             if (callback) callback(null, api);
         };
     };
-    
+
     return api;
 };
 
@@ -66,29 +70,32 @@ PeerPouch._wrappedAPI = function (db) {
         - secure (peer could provide untoward arguments)
     */
     var rpcAPI = {};
-    
-    
+
+
     /*
         This lists the core "customApi" methods that are expected by pouch.adapter.js
     */
     var methods = ['bulkDocs', '_getRevisionTree', '_doCompaction', '_get', '_getAttachment', '_allDocs', '_changes', '_close', '_info', '_id'];
-    
+    // var methods = ['post', 'put', 'putAttachment', 'removeAttachment', 'remove', 'revsDiff', 'compactDocument', 'compact', 'get', 'getAttachment', 'allDocs', 'changes', 'close', 'info', 'id', 'type', 'bulkDocs', 'registerDependentDatabase'];
+
     // most methods can just be proxied directly
     methods.forEach(function (k) {
         rpcAPI[k] = db[k];
         if (rpcAPI[k]) rpcAPI[k]._keep_exposed = true;
     });
-    
+
     // one override, to pass the `.cancel()` helper via callback to the synchronous override on the other side
     rpcAPI._changes = function (opts, rpcCB) {
         var retval = db._changes(opts);
         rpcCB(retval.cancel);
     }
     rpcAPI._changes._keep_exposed = true;
-    
+
     // just send the local result
     rpcAPI._id = db.id();
-    
+
+    console.log('RPCAPI', rpcAPI);
+
     return rpcAPI;
 };
 
@@ -125,15 +132,15 @@ function PeerConnectionHandler(opts) {
         con = (opts.reliable) ? {} : { 'optional': [{'RtpDataChannels': true }] };
 
     this._rtc = new RTCPeerConnection(cfg, con);
-    
+
     this.LOG_SELF = opts._self;
     this.LOG_PEER = opts._peer;
     this._channel = null;
-    
+
     this.onhavesignal = null;       // caller MUST provide this
     this.onreceivemessage = null;   // caller SHOULD provide this
     this.onconnection = null;       // …and maybe this
-    
+
     var handler = this, rtc = this._rtc;
     if (opts.initiate) this._setupChannel();
     else rtc.ondatachannel = this._setupChannel.bind(this);
@@ -216,7 +223,7 @@ PeerConnectionHandler.prototype._tube = function () {      // TODO: refactor Pee
 
 function RPCHandler(tube) {
     this.onbootstrap = null;        // caller MAY provide this
-    
+
     this._exposed_fns = Object.create(null);
     this.serialize = function (obj) {
         var messages = [];
@@ -229,7 +236,7 @@ function RPCHandler(tube) {
                 // HACK: pouch.idb.js likes to bounce a ctx object around but if we null it out it recreates
                 // c.f. https://github.com/daleharvey/pouchdb/commit/e7f66a02509bd2a9bd12369c87e6238fadc13232
                 return;
-                
+
                 // TODO: the WebSQL adapter also does this but does NOT create a new transaction if it's missing :-(
                 // https://github.com/daleharvey/pouchdb/blob/80514c7d655453213f9ca7113f327424969536c4/src/adapters/pouch.websql.js#L646
                 // so we'll have to either get that fixed upstream or add remote object references (but how to garbage collect? what if local uses?!)
@@ -241,7 +248,7 @@ function RPCHandler(tube) {
         }.bind(this)));
         return messages;
     };
-    
+
     var blobsForNextCall = [];                  // each binary object is sent before the function call message
     this.deserialize = function (data) {
         if (typeof data === 'string') {
@@ -259,14 +266,14 @@ function RPCHandler(tube) {
             blobsForNextCall.length = 0;
         } else blobsForNextCall.push(data);
     };
-    
+
     function _isBlob(obj) {
         var type = Object.prototype.toString.call(obj);
         return (type === '[object Blob]' || type === '[object File]');
     }
-    
+
     this._callRemote = function (fn, args) {
-//console.log("Serializing RPC", fn, args);
+console.log("Serializing RPC", fn, args);
         var messages = this.serialize({
             fn: fn,
             args: Array.prototype.slice.call(args)
@@ -290,27 +297,27 @@ function RPCHandler(tube) {
             }
         }
     };
-    
+
     this._exposed_fns['__BOOTSTRAP__'] = function () {
         if (this.onbootstrap) this.onbootstrap.apply(this, arguments);
     }.bind(this);
-    
-    
+
+
     tube.onmessage = function (evt) {
         var call = this.deserialize(evt.data);
-        if (!call) return;      // 
-        
+        if (!call) return;      //
+
         var fn = this._exposed_fns[call.fn];
         if (!fn) {
             console.warn("RPC call to unknown local function", call);
             return;
         }
-        
+
         // leak only callbacks which are marked for keeping (most are one-shot)
         if (!fn._keep_exposed) delete this._exposed_fns[call.fn];
-        
+
         try {
-//console.log("Calling RPC", fn, call.args);
+console.log("Calling RPC", fn, call.args);
             fn.apply(null, call.args);
         } catch (e) {           // we do not signal exceptions remotely
             console.warn("Local RPC invocation unexpectedly threw: "+e, e);
@@ -324,7 +331,7 @@ RPCHandler.prototype.bootstrap = function () {
 
 var SharePouch = function (hub) {
     // NOTE: this plugin's methods are intended for use only on a **hub** database
-    
+
     // this chunk of code manages a combined _changes listener on hub for any share/signal(/etc.) watchers
     var watcherCount = 0,         // easier to refcount than re-count!
         watchersByType = Object.create(null),
@@ -368,17 +375,18 @@ var SharePouch = function (hub) {
             changesListener = null;
         }
     }
-    
+
     var sharesByRemoteId = Object.create(null),         // ._id of share doc
         sharesByLocalId = Object.create(null);            // .id() of database
     function share(db, opts, cb) {
+        hub = this;
         if (typeof opts === 'function') {
             cb = opts;
             opts = {};
         } else opts || (opts = {});
-        
+
         var share = {
-            _id: 'share-'+Pouch.uuid(),
+            _id: 'share-'+Pouch.utils.uuid(),
             type: _t.share,
             name: opts.name || null,
             info: opts.info || null
@@ -387,18 +395,18 @@ var SharePouch = function (hub) {
             if (!e) share._rev = d.rev;
             if (cb) cb(e,d);
         });
-        
+
         var peerHandlers = Object.create(null);
         share._signalWatcher = addWatcher(_t.signal, function receiveSignal(signal) {
             if (signal.recipient !== share._id) return;
-            
+
             var self = share._id, peer = signal.sender, info = signal.info,
                 handler = peerHandlers[peer];
             if (!handler) {
                 handler = peerHandlers[peer] = new PeerConnectionHandler({initiate:false, _self:self, _peer:peer});
                 handler.onhavesignal = function sendSignal(evt) {
                     hub.post({
-                        _id:'s-signal-'+Pouch.uuid(), type:_t.signal,
+                        _id:'s-signal-'+Pouch.utils.uuid(), type:_t.signal,
                         sender:self, recipient:peer,
                         data:evt.signal, info:share.info
                     }, function (e) { if (e) throw e; });
@@ -425,6 +433,7 @@ var SharePouch = function (hub) {
         sharesByRemoteId[share._id] = sharesByLocalId[db.id()] = share;
     }
     function unshare(db, cb) {            // TODO: call this automatically from _delete hook whenever it sees a previously shared db?
+        hub = this;
         var share = sharesByLocalId[db.id()];
         if (!share) return cb && setTimeout(function () {
             cb(new Error("Database is not currently shared"));
@@ -434,16 +443,16 @@ var SharePouch = function (hub) {
         delete sharesByRemoteId[share._id];
         delete sharesByLocalId[db.id()];
     }
-    
+
     function _localizeShare(doc) {
         var name = [hub.id(),doc._id].map(encodeURIComponent).join('/');
         if (doc._deleted) delete PeerPouch._shareInitializersByName[name];
         else PeerPouch._shareInitializersByName[name] = function (opts) {
-            var client = 'peer-'+Pouch.uuid(), share = doc._id,
+            var client = 'peer-'+Pouch.utils.uuid(), share = doc._id,
                 handler = new PeerConnectionHandler({initiate:true, _self:client, _peer:share});
             handler.onhavesignal = function sendSignal(evt) {
                 hub.post({
-                    _id:'p-signal-'+Pouch.uuid(), type:_t.signal,
+                    _id:'p-signal-'+Pouch.utils.uuid(), type:_t.signal,
                     sender:client, recipient:share,
                     data:evt.signal, info:opts.info
                 }, function (e) { if (e) throw e; });
@@ -458,12 +467,13 @@ var SharePouch = function (hub) {
         doc.dbname = 'webrtc://'+name;
         return doc;
     }
-    
+
     function _isLocal(doc) {
         return (doc._id in sharesByRemoteId);
     }
-    
+
     function getShares(opts, cb) {
+        hub = this;
         if (typeof opts === 'function') {
             cb = opts;
             opts = {};
@@ -480,7 +490,7 @@ var SharePouch = function (hub) {
             return addWatcher(_t.share, function (doc) { if (!_isLocal(doc)) opts.onChange(_localizeShare(doc)); });
         }
     }
-    
+
     return {shareDatabase:share, unshareDatabase:unshare, getSharedDatabases:getShares};
 }
 
@@ -489,7 +499,7 @@ PeerPouch._shareInitializersByName = Object.create(null);           // global co
 SharePouch._delete = function () {};            // blindly called by Pouch.destroy
 
 
-Pouch.plugin('hub', SharePouch);
+Pouch.plugin(SharePouch());
 
 
 
